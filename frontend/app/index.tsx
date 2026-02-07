@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,13 +19,15 @@ import {
   Easing,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Audio } from 'expo-av';
-import axios from 'axios';
+import { Audio, AVPlaybackStatus } from 'expo-av';
+import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
+const USER_ID_STORAGE_KEY = 'kwanya_user_id';
+const THEME_STORAGE_KEY = 'themePreference';
 
 interface Message {
   id: string;
@@ -43,13 +45,22 @@ interface Conversation {
   updated_at: string;
 }
 
+interface AudioFileUpload {
+  uri: string;
+  type: string;
+  name: string;
+}
+
+// Move outside component to avoid recreation on every render
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
 export default function KwanyaApp() {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
   const isDark = themePreference === 'system' ? colorScheme === 'dark' : themePreference === 'dark';
 
-  const palette = {
+  const palette = useMemo(() => ({
     bg: isDark ? '#000000' : '#ffffff',
     surface: isDark ? '#0d0d0d' : '#f7f7f7',
     surfaceAlt: isDark ? '#151515' : '#f2f2f2',
@@ -61,8 +72,8 @@ export default function KwanyaApp() {
     button: isDark ? '#ffffff' : '#000000',
     buttonText: isDark ? '#000000' : '#ffffff',
     disabled: isDark ? '#2f2f2f' : '#d9d9d9',
-  };
-  
+  }), [isDark]);
+
   // State
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -71,50 +82,70 @@ export default function KwanyaApp() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
-  const [userId] = useState('user-' + Date.now());
+  const [userId, setUserId] = useState<string | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isAudioPaused, setIsAudioPaused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
-  const [isCancelled, setIsCancelled] = useState(false);
   const [sidebarMounted, setSidebarMounted] = useState(false);
   const [themeExpanded, setThemeExpanded] = useState(false);
-  
+
   const flatListRef = useRef<FlatList>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
   const sidebarWidth = Math.min(Dimensions.get('window').width * 0.8, 320);
   const sidebarTranslateX = useRef(new Animated.Value(-sidebarWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
-  const THEME_STORAGE_KEY = 'themePreference';
 
-  // Initialize app
+  // Keep refs in sync with state
+  useEffect(() => { recordingRef.current = recording; }, [recording]);
+  useEffect(() => { soundRef.current = sound; }, [sound]);
+
+  // Load persisted userId on mount
   useEffect(() => {
+    const loadOrCreateUserId = async () => {
+      try {
+        let storedId = await AsyncStorage.getItem(USER_ID_STORAGE_KEY);
+        if (!storedId) {
+          storedId = 'user-' + Date.now();
+          await AsyncStorage.setItem(USER_ID_STORAGE_KEY, storedId);
+        }
+        setUserId(storedId);
+      } catch (error) {
+        console.error('Failed to load/create user ID:', error);
+        setUserId('user-' + Date.now());
+      }
+    };
+    loadOrCreateUserId();
+  }, []);
+
+  // Initialize app once userId is ready
+  useEffect(() => {
+    if (!userId) return;
+
     initializeApp();
-    
-    // Keyboard listeners for Android
+
+    // Keyboard listeners
     const keyboardDidShowListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => {
-        setKeyboardVisible(true);
-      }
+      () => setKeyboardVisible(true),
     );
     const keyboardDidHideListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        setKeyboardVisible(false);
-      }
+      () => setKeyboardVisible(false),
     );
 
     return () => {
-      if (recording) {
-        recording.unloadAsync();
+      if (recordingRef.current) {
+        recordingRef.current.unloadAsync();
       }
-      if (sound) {
-        sound.unloadAsync();
+      if (soundRef.current) {
+        soundRef.current.unloadAsync();
       }
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -122,7 +153,7 @@ export default function KwanyaApp() {
       keyboardDidShowListener.remove();
       keyboardDidHideListener.remove();
     };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     const loadThemePreference = async () => {
@@ -204,10 +235,8 @@ export default function KwanyaApp() {
 
   const initializeApp = async () => {
     try {
-      // Request audio permissions
       await Audio.requestPermissionsAsync();
-      
-      // Set audio mode
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -215,10 +244,7 @@ export default function KwanyaApp() {
         playThroughEarpieceAndroid: false,
       });
 
-      // Load conversation history
       await loadConversationHistory();
-
-      // Create or load conversation
       await createConversation();
     } catch (error) {
       console.error('Initialization error:', error);
@@ -233,14 +259,12 @@ export default function KwanyaApp() {
         language: 'ha',
       });
       setCurrentConversation(response.data);
-      // Refresh conversation history
       await loadConversationHistory();
     } catch (error) {
       console.error('Failed to create conversation:', error);
     }
   };
 
-  // Load conversation history
   const loadConversationHistory = async () => {
     try {
       const response = await axios.get(`${BACKEND_URL}/api/conversations/${userId}`);
@@ -252,7 +276,6 @@ export default function KwanyaApp() {
     }
   };
 
-  // Start a new chat
   const startNewChat = async () => {
     setSidebarVisible(false);
     setMessages([]);
@@ -260,7 +283,6 @@ export default function KwanyaApp() {
     await createConversation();
   };
 
-  // Load a specific conversation
   const loadConversation = async (conversation: Conversation) => {
     setSidebarVisible(false);
     setCurrentConversation(conversation);
@@ -274,27 +296,22 @@ export default function KwanyaApp() {
     }
   };
 
-  // Auto-name conversation based on first message
   const autoNameConversation = async (conversationId: string, firstMessage: string) => {
     try {
-      // Create a short title from the first message (max 30 chars)
-      const title = firstMessage.length > 30 
-        ? firstMessage.substring(0, 30) + '...' 
+      const title = firstMessage.length > 30
+        ? firstMessage.substring(0, 30) + '...'
         : firstMessage;
-      
-      // Update conversation title in database
+
       await axios.patch(`${BACKEND_URL}/api/conversations/${conversationId}`, {
         title: title
       });
-      
-      // Refresh history
+
       await loadConversationHistory();
     } catch (error) {
       console.error('Failed to auto-name conversation:', error);
     }
   };
 
-  // Voice recording functions
   const startRecording = async () => {
     try {
       const { granted } = await Audio.getPermissionsAsync();
@@ -318,7 +335,6 @@ export default function KwanyaApp() {
       setIsRecording(true);
       setRecordingTime(0);
 
-      // Start timer
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
@@ -360,16 +376,15 @@ export default function KwanyaApp() {
     setIsLoading(true);
     try {
       const formData = new FormData();
-      
-      // Create file object for upload
-      const audioFile: any = {
+
+      const audioFile: AudioFileUpload = {
         uri: audioUri,
         type: 'audio/m4a',
         name: 'recording.m4a',
       };
 
-      formData.append('audio', audioFile);
-      formData.append('user_id', userId);
+      formData.append('audio', audioFile as unknown as Blob);
+      formData.append('user_id', userId!);
       formData.append('conversation_id', currentConversation.id);
 
       const response = await axios.post(
@@ -384,8 +399,7 @@ export default function KwanyaApp() {
 
       if (response.data.success) {
         const transcribedText = response.data.transcription;
-        
-        // Add user message to UI
+
         const userMessage: Message = {
           id: response.data.message_id,
           role: 'user',
@@ -394,13 +408,13 @@ export default function KwanyaApp() {
         };
         setMessages((prev) => [...prev, userMessage]);
 
-        // Get AI response
         await getAIResponse(transcribedText);
       }
 
-    } catch (error: any) {
+    } catch (error) {
+      const axiosErr = error as AxiosError<{ detail?: string }>;
       console.error('Transcription error:', error);
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to transcribe audio');
+      Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to transcribe audio');
     } finally {
       setIsLoading(false);
     }
@@ -421,7 +435,6 @@ export default function KwanyaApp() {
     const messageText = inputText;
     setInputText('');
 
-    // Auto-name conversation on first message
     if (isFirstMessage) {
       await autoNameConversation(currentConversation.id, messageText);
     }
@@ -429,25 +442,22 @@ export default function KwanyaApp() {
     await getAIResponse(messageText);
   };
 
-  // Stop generating response (cancel chat and TTS)
   const stopGenerating = async () => {
-    // Cancel any ongoing requests
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
-    // Stop any playing audio
-    if (sound) {
+
+    if (soundRef.current) {
       try {
-        await sound.stopAsync();
-        await sound.unloadAsync();
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
         setSound(null);
-      } catch (e) {
-        // Ignore errors
+      } catch (_e) {
+        // Ignore errors during cleanup
       }
     }
-    
-    setIsCancelled(true);
+
+    cancelledRef.current = true;
     setIsLoading(false);
     setIsPlayingAudio(false);
     setIsAudioPaused(false);
@@ -456,12 +466,12 @@ export default function KwanyaApp() {
   const getAIResponse = async (userMessage: string) => {
     if (!currentConversation) return;
 
-    // Create new abort controller for this request
     abortControllerRef.current = new AbortController();
-    setIsCancelled(false);
+    cancelledRef.current = false;
     setIsLoading(true);
-    
+
     try {
+      // Backend /chat endpoint now saves the user message to DB
       const response = await axios.post(`${BACKEND_URL}/api/chat`, {
         conversation_id: currentConversation.id,
         user_id: userId,
@@ -471,8 +481,7 @@ export default function KwanyaApp() {
         signal: abortControllerRef.current.signal
       });
 
-      // Check if cancelled before continuing
-      if (isCancelled) return;
+      if (cancelledRef.current) return;
 
       if (response.data.success) {
         const assistantMessage: Message = {
@@ -484,20 +493,20 @@ export default function KwanyaApp() {
 
         setMessages((prev) => [...prev, assistantMessage]);
 
-        // Check if cancelled before playing TTS
-       // if (!isCancelled) {
-          // Generate and play TTS for assistant response
-       //   await playTextToSpeech(response.data.response);
-        //}
+        // Generate and play TTS for assistant response
+        if (!cancelledRef.current) {
+          await playTextToSpeech(response.data.response);
+        }
       }
 
-    } catch (error: any) {
-      if (axios.isCancel(error) || error.name === 'AbortError') {
+    } catch (error) {
+      const axiosErr = error as AxiosError<{ detail?: string }>;
+      if (axios.isCancel(error) || (error instanceof Error && error.name === 'AbortError')) {
         console.log('Request cancelled by user');
         return;
       }
       console.error('Chat error:', error);
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to get response');
+      Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to get response');
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
@@ -505,33 +514,22 @@ export default function KwanyaApp() {
   };
 
   const playTextToSpeech = async (text: string) => {
-    // Check if cancelled
-    if (isCancelled) return;
-    
+    if (cancelledRef.current) return;
+
     try {
-      // Create abort controller for TTS request
-      const ttsAbortController = new AbortController();
-      
-      // Using TWB Voice Hausa TTS (Fully Optimized - Female Voice)
       const response = await axios.post(`${BACKEND_URL}/api/text-to-speech`, {
         text,
         language: 'ha',
-      }, {
-        signal: ttsAbortController.signal
       });
 
-      // Check if cancelled before playing audio
-      if (isCancelled) return;
+      if (cancelledRef.current) return;
 
       if (response.data.success) {
         const audioContent = response.data.audio_content;
-        
-        // Create audio from base64 (WAV format from TWB Voice TTS)
         const base64Audio = `data:audio/wav;base64,${audioContent}`;
-        
-        // Unload previous sound
-        if (sound) {
-          await sound.unloadAsync();
+
+        if (soundRef.current) {
+          await soundRef.current.unloadAsync();
         }
 
         const { sound: newSound } = await Audio.Sound.createAsync(
@@ -541,15 +539,15 @@ export default function KwanyaApp() {
 
         setSound(newSound);
 
-        // Set playback status callback
-        newSound.setOnPlaybackStatusUpdate((status: any) => {
-          if (status.isPlaying && !isPlayingAudio) {
-            // Audio has started playing - now show the controls
-            setIsPlayingAudio(true);
-          }
-          if (status.didJustFinish) {
-            setIsPlayingAudio(false);
-            setIsAudioPaused(false);
+        newSound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+          if (status.isLoaded) {
+            if (status.isPlaying) {
+              setIsPlayingAudio(true);
+            }
+            if (status.didJustFinish) {
+              setIsPlayingAudio(false);
+              setIsAudioPaused(false);
+            }
           }
         });
       }
@@ -560,12 +558,11 @@ export default function KwanyaApp() {
     }
   };
 
-  // Stop audio playback
   const stopAudio = async () => {
     try {
-      if (sound) {
-        await sound.stopAsync();
-        await sound.unloadAsync();
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
         setSound(null);
       }
       setIsPlayingAudio(false);
@@ -577,15 +574,14 @@ export default function KwanyaApp() {
     }
   };
 
-  // Pause/Resume audio playback
   const togglePauseAudio = async () => {
     try {
-      if (sound) {
+      if (soundRef.current) {
         if (isAudioPaused) {
-          await sound.playAsync();
+          await soundRef.current.playAsync();
           setIsAudioPaused(false);
         } else {
-          await sound.pauseAsync();
+          await soundRef.current.pauseAsync();
           setIsAudioPaused(true);
         }
       }
@@ -600,9 +596,9 @@ export default function KwanyaApp() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
+  const renderMessage = useCallback(({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
-    
+
     return (
       <TouchableOpacity
         activeOpacity={0.85}
@@ -624,9 +620,64 @@ export default function KwanyaApp() {
         </Text>
       </TouchableOpacity>
     );
-  };
+  }, [isDark, palette]);
 
-  const styles = StyleSheet.create({
+  // Extracted InputArea to avoid duplication
+  const renderInputArea = (containerStyle: object) => (
+    <View style={containerStyle}>
+      {isRecording && (
+        <View style={styles.recordingIndicator}>
+          <View style={styles.recordingDot} />
+          <Text style={styles.recordingText}>Recording</Text>
+          <Text style={styles.recordingText}>{formatTime(recordingTime)}</Text>
+        </View>
+      )}
+
+      <View style={styles.inputRow}>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Type in Hausa..."
+          placeholderTextColor={palette.textSubtle}
+          value={inputText}
+          onChangeText={setInputText}
+          multiline
+          editable={!isLoading && !isRecording}
+        />
+
+        <TouchableOpacity
+          style={[
+            styles.iconButton,
+            isRecording && styles.iconButtonRecording,
+            isLoading && styles.iconButtonDisabled,
+          ]}
+          onPress={isRecording ? stopRecording : startRecording}
+          disabled={isLoading}
+        >
+          <Ionicons
+            name={isRecording ? 'stop' : 'mic'}
+            size={24}
+            color={palette.buttonText}
+          />
+        </TouchableOpacity>
+
+        {inputText.trim().length > 0 && (
+          <TouchableOpacity
+            style={[
+              styles.iconButton,
+              isLoading && styles.iconButtonDisabled,
+            ]}
+            onPress={sendTextMessage}
+            disabled={isLoading || isRecording}
+          >
+            <Ionicons name="send" size={20} color={palette.buttonText} />
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+
+  // Memoize styles that depend on palette/insets/keyboardVisible
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: palette.bg,
@@ -871,26 +922,7 @@ export default function KwanyaApp() {
     assistantMessageText: {
       color: palette.text,
     },
-    messageTextDark: {
-    },
-    emptyContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingHorizontal: 40,
-    },
-    emptyText: {
-      fontSize: 18,
-      color: palette.textMuted,
-      textAlign: 'center',
-      marginTop: 16,
-    },
-    emptySubtext: {
-      fontSize: 14,
-      color: palette.textSubtle,
-      textAlign: 'center',
-      marginTop: 8,
-    },
+    messageTextDark: {},
     centeredInputWrapper: {
       position: 'absolute',
       bottom: 0,
@@ -904,6 +936,12 @@ export default function KwanyaApp() {
     welcomeSection: {
       alignItems: 'center',
       marginBottom: 32,
+    },
+    emptyText: {
+      fontSize: 18,
+      color: palette.textMuted,
+      textAlign: 'center',
+      marginTop: 16,
     },
     inputContainer: {
       width: '90%',
@@ -1077,25 +1115,16 @@ export default function KwanyaApp() {
       color: palette.text,
       fontWeight: '600',
     },
-    emptyContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingHorizontal: 40,
-    },
-    emptyText: {
-      fontSize: 18,
-      color: palette.textMuted,
-      textAlign: 'center',
-      marginTop: 16,
-    },
-    emptySubtext: {
-      fontSize: 14,
-      color: palette.textSubtle,
-      textAlign: 'center',
-      marginTop: 8,
-    },
-  });
+  }), [palette, insets, keyboardVisible]);
+
+  // Don't render until userId is loaded
+  if (!userId) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: palette.bg }}>
+        <ActivityIndicator size="large" color={palette.text} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -1119,8 +1148,8 @@ export default function KwanyaApp() {
         onRequestClose={() => setSidebarVisible(false)}
       >
         <View style={styles.sidebarOverlay}>
-          <AnimatedTouchableOpacity 
-            style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]} 
+          <AnimatedTouchableOpacity
+            style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]}
             activeOpacity={1}
             onPress={() => setSidebarVisible(false)}
           />
@@ -1247,12 +1276,12 @@ export default function KwanyaApp() {
                       ]}
                       onPress={() => loadConversation(conv)}
                     >
-                      <Ionicons 
-                        name="chatbubble-outline" 
-                        size={18} 
-                        color={currentConversation?.id === conv.id ? palette.text : palette.textMuted} 
+                      <Ionicons
+                        name="chatbubble-outline"
+                        size={18}
+                        color={currentConversation?.id === conv.id ? palette.text : palette.textMuted}
                       />
-                      <Text 
+                      <Text
                         style={[
                           styles.chatHistoryItemText,
                           currentConversation?.id === conv.id && styles.chatHistoryItemTextActive,
@@ -1283,60 +1312,11 @@ export default function KwanyaApp() {
             <Text style={styles.emptyText}>Barka da zuwa!</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            {isRecording && (
-              <View style={styles.recordingIndicator}>
-                <View style={styles.recordingDot} />
-                <Text style={styles.recordingText}>Recording</Text>
-                <Text style={styles.recordingText}>{formatTime(recordingTime)}</Text>
-              </View>
-            )}
-
-            <View style={styles.inputRow}>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type in Hausa..."
-                placeholderTextColor={palette.textSubtle}
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-                editable={!isLoading && !isRecording}
-              />
-
-              <TouchableOpacity
-                style={[
-                  styles.iconButton,
-                  isRecording && styles.iconButtonRecording,
-                  isLoading && styles.iconButtonDisabled,
-                ]}
-                onPress={isRecording ? stopRecording : startRecording}
-                disabled={isLoading}
-              >
-                <Ionicons
-                  name={isRecording ? 'stop' : 'mic'}
-                  size={24}
-                  color={palette.buttonText}
-                />
-              </TouchableOpacity>
-
-              {inputText.trim().length > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.iconButton,
-                    isLoading && styles.iconButtonDisabled,
-                  ]}
-                  onPress={sendTextMessage}
-                  disabled={isLoading || isRecording}
-                >
-                  <Ionicons name="send" size={20} color={palette.buttonText} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+          {renderInputArea(styles.inputContainer)}
         </View>
       ) : (
         /* Messages exist - normal layout with input at bottom */
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
@@ -1401,57 +1381,8 @@ export default function KwanyaApp() {
             </View>
           )}
 
-          {/* Input at bottom */}
-          <View style={styles.bottomInputContainer}>
-            {isRecording && (
-              <View style={styles.recordingIndicator}>
-                <View style={styles.recordingDot} />
-                <Text style={styles.recordingText}>Recording</Text>
-                <Text style={styles.recordingText}>{formatTime(recordingTime)}</Text>
-              </View>
-            )}
-
-            <View style={styles.inputRow}>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type in Hausa..."
-                placeholderTextColor={palette.textSubtle}
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-                editable={!isLoading && !isRecording}
-              />
-
-              <TouchableOpacity
-                style={[
-                  styles.iconButton,
-                  isRecording && styles.iconButtonRecording,
-                  isLoading && styles.iconButtonDisabled,
-                ]}
-                onPress={isRecording ? stopRecording : startRecording}
-                disabled={isLoading}
-              >
-                <Ionicons
-                  name={isRecording ? 'stop' : 'mic'}
-                  size={24}
-                  color={palette.buttonText}
-                />
-              </TouchableOpacity>
-
-              {inputText.trim().length > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.iconButton,
-                    isLoading && styles.iconButtonDisabled,
-                  ]}
-                  onPress={sendTextMessage}
-                  disabled={isLoading || isRecording}
-                >
-                  <Ionicons name="send" size={20} color={palette.buttonText} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+          {/* Input at bottom - reused component */}
+          {renderInputArea(styles.bottomInputContainer)}
         </KeyboardAvoidingView>
       )}
     </View>

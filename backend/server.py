@@ -1,20 +1,25 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import subprocess
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import base64
 import aiofiles
 import tempfile
 import io
 import asyncio
+from collections import defaultdict
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 # Hausa ASR (NCAIR1/Hausa-ASR) - Fine-tuned Whisper for Hausa
@@ -198,11 +203,43 @@ def get_twb_tts():
         twb_tts = load_twb_tts_optimized()
     return twb_tts
 
-# Create the main app
-app = FastAPI(title="Kwanya - Hausa Conversational AI (TWB Voice TTS - Optimized)")
+# ==================== LIFESPAN ====================
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown lifecycle"""
+    # Startup
+    logger.info("Preloading optimized TWB Voice TTS model...")
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(tts_executor, get_twb_tts)
+        logger.info("Optimized TWB Voice TTS model preloaded successfully!")
+
+        logger.info("Warming up model...")
+        await loop.run_in_executor(tts_executor, synthesize_speech_optimized, "sannu")
+        logger.info("Model warmup complete!")
+    except Exception as e:
+        logger.error(f"Failed to preload TTS model: {e}")
+
+    # Create TTL index on audio_cache (expire after 7 days)
+    try:
+        await db.audio_cache.create_index("created_at", expireAfterSeconds=7 * 24 * 3600)
+        logger.info("TTL index on audio_cache created")
+    except Exception as e:
+        logger.warning(f"Could not create TTL index: {e}")
+
+    yield
+
+    # Shutdown
+    if twb_temp_config and os.path.exists(twb_temp_config.name):
+        try:
+            os.unlink(twb_temp_config.name)
+        except OSError:
+            pass
+    client.close()
+    tts_executor.shutdown(wait=False)
+    asr_executor.shutdown(wait=False)
+
 
 # Configure logging
 logging.basicConfig(
@@ -210,6 +247,54 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# ==================== RATE LIMITING ====================
+
+class RateLimiter:
+    """Simple in-memory rate limiter per IP address"""
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        window_start = now - self.window_seconds
+        # Remove expired entries
+        self._requests[key] = [t for t in self._requests[key] if t > window_start]
+        if len(self._requests[key]) >= self.max_requests:
+            return False
+        self._requests[key].append(now)
+        return True
+
+rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
+tts_rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
+
+
+# ==================== AUTHENTICATION ====================
+
+API_KEY = os.environ.get("API_KEY")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def verify_api_key(api_key: Optional[str] = Security(api_key_header)):
+    """Verify API key if one is configured in environment"""
+    if not API_KEY:
+        # No API key configured, allow all requests (development mode)
+        return None
+    if api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+    return api_key
+
+
+# Create the main app
+app = FastAPI(
+    title="Kwanya - Hausa Conversational AI (TWB Voice TTS - Optimized)",
+    lifespan=lifespan,
+)
+
+# Create a router with the /api prefix and API key auth
+api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
 
 # ==================== MODELS ====================
@@ -220,7 +305,7 @@ class Message(BaseModel):
     role: str  # 'user' or 'assistant'
     content: str
     audio_url: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Conversation(BaseModel):
@@ -228,8 +313,8 @@ class Conversation(BaseModel):
     user_id: str
     title: str = "New Conversation"
     language: str = "ha"  # Hausa by default
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TranscriptionRequest(BaseModel):
@@ -317,7 +402,6 @@ async def transcribe_audio(
         wav_path = wav_temp.name
         wav_temp.close()
         
-        import subprocess
         try:
             # Use ffmpeg to convert M4A to 16kHz mono WAV
             result = subprocess.run([
@@ -339,7 +423,7 @@ async def transcribe_audio(
             raise Exception("FFmpeg not found. Please install ffmpeg.")
         
         # Transcribe using Hausa ASR in thread pool
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         transcribed_text = await loop.run_in_executor(
             asr_executor,
             transcribe_hausa_audio_sync,
@@ -350,7 +434,7 @@ async def transcribe_audio(
         try:
             os.unlink(temp_path)
             os.unlink(wav_path)
-        except:
+        except OSError:
             pass
         
         # Save message to database
@@ -360,12 +444,12 @@ async def transcribe_audio(
             content=transcribed_text
         )
         
-        await db.messages.insert_one(message.dict())
+        await db.messages.insert_one(message.model_dump())
         
         # Update conversation timestamp
         await db.conversations.update_one(
             {"id": conversation_id},
-            {"$set": {"updated_at": datetime.utcnow()}}
+            {"$set": {"updated_at": datetime.now(timezone.utc)}}
         )
         
         logger.info(f"Transcription successful: {transcribed_text[:50]}...")
@@ -388,12 +472,20 @@ async def chat(request: ChatRequest):
     """Generate conversational AI response using Google Gemini"""
     try:
         logger.info(f"Chat request for conversation: {request.conversation_id}")
-        
+
+        # Save user message to database
+        user_msg = Message(
+            conversation_id=request.conversation_id,
+            role="user",
+            content=request.message
+        )
+        await db.messages.insert_one(user_msg.model_dump())
+
         # Get conversation history
         messages = await db.messages.find(
             {"conversation_id": request.conversation_id}
         ).sort("timestamp", 1).to_list(100)
-        
+
         # Initialize Gemini chat
         system_message = """You are a helpful AI assistant that speaks Hausa language.
 You are friendly, knowledgeable, and culturally aware of West African contexts, particularly Nigeria.
@@ -422,12 +514,12 @@ Do not introduce yourself or mention your name; answer directly."""
             content=response
         )
         
-        await db.messages.insert_one(assistant_message.dict())
+        await db.messages.insert_one(assistant_message.model_dump())
         
         # Update conversation
         await db.conversations.update_one(
             {"id": request.conversation_id},
-            {"$set": {"updated_at": datetime.utcnow()}}
+            {"$set": {"updated_at": datetime.now(timezone.utc)}}
         )
         
         logger.info(f"Chat response generated: {response[:50]}...")
@@ -435,9 +527,10 @@ Do not introduce yourself or mention your name; answer directly."""
         return {
             "success": True,
             "response": response,
-            "message_id": assistant_message.id
+            "message_id": assistant_message.id,
+            "user_message_id": user_msg.id
         }
-        
+
     except Exception as e:
         logger.error(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
@@ -449,7 +542,7 @@ Do not introduce yourself or mention your name; answer directly."""
 async def text_to_speech(request: TTSRequest):
     """
     Convert text to speech using TWB Voice Hausa TTS (Fully Optimized)
-    
+
     Optimizations applied:
     - Single speaker mode (spk_f_1 - female voice)
     - Pre-computed speaker embedding
@@ -458,10 +551,17 @@ async def text_to_speech(request: TTSRequest):
     - Audio downsampling (16kHz)
     - Response caching
     """
+    # Rate limit TTS (expensive operation)
+    if not tts_rate_limiter.is_allowed("tts_global"):
+        raise HTTPException(status_code=429, detail="TTS rate limit exceeded. Try again later.")
     try:
         text = request.text
+        if not text or not text.strip():
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        if len(text) > 5000:
+            raise HTTPException(status_code=400, detail="Text too long. Maximum 5000 characters.")
         logger.info(f"TTS request for text ({len(text)} chars): {text[:50]}...")
-        
+
         # Check cache first (using fixed speaker)
         cached_audio = await db.audio_cache.find_one({
             "text": text.lower(),
@@ -480,7 +580,7 @@ async def text_to_speech(request: TTSRequest):
             }
         
         # Run optimized TTS in thread pool
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         wav_array, sample_rate = await loop.run_in_executor(
             tts_executor,
             synthesize_speech_optimized,
@@ -504,7 +604,7 @@ async def text_to_speech(request: TTSRequest):
                     "language": "ha",
                     "voice": f"twb-voice-{FIXED_SPEAKER}",
                     "audio_content": audio_content,
-                    "created_at": datetime.utcnow()
+                    "created_at": datetime.now(timezone.utc)
                 })
                 logger.info(f"TTS audio generated and cached ({audio_size} bytes)")
             except Exception as cache_error:
@@ -535,7 +635,7 @@ async def create_conversation(input: ConversationCreate):
         user_id=input.user_id,
         language=input.language
     )
-    await db.conversations.insert_one(conversation.dict())
+    await db.conversations.insert_one(conversation.model_dump())
     return conversation
 
 
@@ -556,7 +656,7 @@ class ConversationUpdate(BaseModel):
 @api_router.patch("/conversations/{conversation_id}")
 async def update_conversation(conversation_id: str, update: ConversationUpdate):
     """Update a conversation (e.g., rename title)"""
-    update_data = {"updated_at": datetime.utcnow()}
+    update_data = {"updated_at": datetime.now(timezone.utc)}
     if update.title:
         update_data["title"] = update.title
     
@@ -592,10 +692,18 @@ async def delete_conversation(conversation_id: str):
 @api_router.get("/health")
 async def health_check():
     """Health check endpoint"""
+    # Actually ping MongoDB to verify connectivity
+    mongo_status = "disconnected"
+    try:
+        await client.admin.command("ping")
+        mongo_status = "connected"
+    except Exception:
+        mongo_status = "disconnected"
+
     return {
-        "status": "healthy",
+        "status": "healthy" if mongo_status == "connected" else "degraded",
         "services": {
-            "mongodb": "connected" if client else "disconnected",
+            "mongodb": mongo_status,
             "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
             "gemini": "configured" if os.environ.get('EMERGENT_LLM_KEY') else "not configured",
             "tts": "twb-voice-hausa-tts (CLEAR-Global/TWB-Voice-Hausa-TTS-1.0)"
@@ -616,43 +724,18 @@ async def health_check():
     }
 
 
-# ==================== STARTUP EVENT ====================
-
-@app.on_event("startup")
-async def startup_event():
-    """Preload TTS model with all optimizations on startup"""
-    logger.info("Preloading optimized TWB Voice TTS model...")
-    try:
-        # Load model in background thread
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(tts_executor, get_twb_tts)
-        logger.info("Optimized TWB Voice TTS model preloaded successfully!")
-        
-        # Warm up the model with a short text (helps torch.compile)
-        logger.info("Warming up model...")
-        await loop.run_in_executor(
-            tts_executor,
-            synthesize_speech_optimized,
-            "sannu"
-        )
-        logger.info("Model warmup complete!")
-    except Exception as e:
-        logger.error(f"Failed to preload TTS model: {e}")
-
-
 # Include the router in the main app
 app.include_router(api_router)
+
+# CORS - restrict to known origins (allow all in development via env var)
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
+if not allowed_origins or allowed_origins == [""]:
+    allowed_origins = ["http://localhost:8081", "http://localhost:19006"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-    tts_executor.shutdown(wait=False)
