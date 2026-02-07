@@ -1,34 +1,33 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import subprocess
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime
-import base64
+from datetime import datetime, timezone, timedelta
 import aiofiles
 import tempfile
-import io
 import asyncio
+from collections import defaultdict
+import time
 from concurrent.futures import ThreadPoolExecutor
+import bcrypt
+from jose import jwt as jose_jwt, JWTError
+import re
+import secrets
 
 # Hausa ASR (NCAIR1/Hausa-ASR) - Fine-tuned Whisper for Hausa
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import soundfile as sf
 import torchaudio
-
-# TWB Voice Hausa TTS (Coqui TTS) - Optimized
-from TTS.api import TTS
-from huggingface_hub import hf_hub_download
-import json
-import scipy.io.wavfile as wavfile
-import scipy.signal as signal
-import numpy as np
 import torch
 
 # Emergent integrations for Gemini
@@ -42,9 +41,13 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Thread pool for TTS and ASR processing
-tts_executor = ThreadPoolExecutor(max_workers=2)
+# Thread pool for ASR processing
 asr_executor = ThreadPoolExecutor(max_workers=2)
+
+# JWT Configuration
+JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24 * 30  # 30 days
 
 # ==================== HAUSA ASR MODEL (Abkrs1/Hausa-ASR-copy) ====================
 # Fine-tuned Whisper model specifically for Hausa language
@@ -98,111 +101,17 @@ def transcribe_hausa_audio_sync(audio_path: str) -> str:
     result = pipe(audio, generate_kwargs={"language": "ha", "task": "transcribe"})
     return result["text"]
 
-# ==================== OPTIMIZED TWB VOICE TTS ====================
-# Optimizations applied:
-# 1. Single speaker mode (spk_f_1 - female voice)
-# 2. Pre-computed speaker embedding
-# 3. torch.compile() for faster inference
-# 4. Model preloading at startup
+# ==================== LIFESPAN ====================
 
-# Fixed speaker for optimization
-FIXED_SPEAKER = "spk_f_1"  # Female voice - locked for optimization
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown lifecycle"""
+    yield
 
-# TWB Voice Hausa TTS model (optimized)
-twb_tts = None
-twb_temp_config = None
-speaker_embedding = None  # Pre-computed speaker embedding
+    # Shutdown
+    client.close()
+    asr_executor.shutdown(wait=False)
 
-def load_twb_tts_optimized():
-    """Load TWB Voice Hausa TTS model with all optimizations"""
-    global twb_tts, twb_temp_config, speaker_embedding
-    
-    logger.info("Loading TWB Voice Hausa TTS model with optimizations...")
-    logger.info(f"Fixed speaker: {FIXED_SPEAKER} (female voice)")
-    
-    # Download model files from Hugging Face
-    model_name = "CLEAR-Global/TWB-Voice-Hausa-TTS-1.0"
-    
-    config_path = hf_hub_download(model_name, "config.json")
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    
-    # Download required files
-    model_path = hf_hub_download(model_name, "best_model_498283.pth")
-    speakers_file = hf_hub_download(model_name, "speakers.pth")
-    language_ids_file = hf_hub_download(model_name, "language_ids.json")
-    d_vector_file = hf_hub_download(model_name, "d_vector.pth")
-    config_se_file = hf_hub_download(model_name, "config_se.json")
-    model_se_file = hf_hub_download(model_name, "model_se.pth")
-    
-    # Update config paths
-    config["speakers_file"] = speakers_file
-    config["language_ids_file"] = language_ids_file
-    config["d_vector_file"] = [d_vector_file]
-    config["model_args"]["speakers_file"] = speakers_file
-    config["model_args"]["language_ids_file"] = language_ids_file
-    config["model_args"]["d_vector_file"] = [d_vector_file]
-    config["model_args"]["speaker_encoder_config_path"] = config_se_file
-    config["model_args"]["speaker_encoder_model_path"] = model_se_file
-    
-    # Save updated config to temp file
-    twb_temp_config = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-    json.dump(config, twb_temp_config, indent=2)
-    twb_temp_config.close()
-    
-    # Load TTS model
-    twb_tts = TTS(model_path=model_path, config_path=twb_temp_config.name)
-    
-    # OPTIMIZATION 1: Pre-compute speaker embedding for fixed speaker
-    logger.info(f"Pre-computing speaker embedding for {FIXED_SPEAKER}...")
-    try:
-        # Get the speaker embedding from the model
-        if hasattr(twb_tts.synthesizer.tts_model, 'speaker_manager'):
-            speaker_manager = twb_tts.synthesizer.tts_model.speaker_manager
-            if speaker_manager and hasattr(speaker_manager, 'embeddings'):
-                speaker_embedding = speaker_manager.embeddings.get(FIXED_SPEAKER)
-                if speaker_embedding is not None:
-                    # Convert to tensor and cache
-                    speaker_embedding = torch.tensor(speaker_embedding).unsqueeze(0)
-                    logger.info(f"Speaker embedding pre-computed: shape {speaker_embedding.shape}")
-    except Exception as e:
-        logger.warning(f"Could not pre-compute speaker embedding: {e}")
-        speaker_embedding = None
-    
-    # OPTIMIZATION 2: Apply torch.compile() for faster inference
-    logger.info("Applying torch.compile() optimization...")
-    try:
-        if hasattr(twb_tts.synthesizer, 'tts_model') and twb_tts.synthesizer.tts_model is not None:
-            # Use reduce-overhead mode for best inference speed
-            twb_tts.synthesizer.tts_model = torch.compile(
-                twb_tts.synthesizer.tts_model,
-                mode="reduce-overhead",
-                fullgraph=False
-            )
-            logger.info("torch.compile() applied successfully!")
-    except Exception as e:
-        logger.warning(f"torch.compile() not available or failed: {e}")
-        logger.info("Continuing without torch.compile() optimization")
-    
-    # Set model to evaluation mode
-    if hasattr(twb_tts.synthesizer, 'tts_model'):
-        twb_tts.synthesizer.tts_model.eval()
-    
-    logger.info("TWB Voice Hausa TTS model loaded with all optimizations!")
-    return twb_tts
-
-def get_twb_tts():
-    """Get or load TWB Voice TTS model"""
-    global twb_tts
-    if twb_tts is None:
-        twb_tts = load_twb_tts_optimized()
-    return twb_tts
-
-# Create the main app
-app = FastAPI(title="Kwanya - Hausa Conversational AI (TWB Voice TTS - Optimized)")
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
 
 # Configure logging
 logging.basicConfig(
@@ -210,6 +119,53 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# ==================== RATE LIMITING ====================
+
+class RateLimiter:
+    """Simple in-memory rate limiter per IP address"""
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        window_start = now - self.window_seconds
+        # Remove expired entries
+        self._requests[key] = [t for t in self._requests[key] if t > window_start]
+        if len(self._requests[key]) >= self.max_requests:
+            return False
+        self._requests[key].append(now)
+        return True
+
+rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
+
+
+# ==================== AUTHENTICATION ====================
+
+API_KEY = os.environ.get("API_KEY")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def verify_api_key(api_key: Optional[str] = Security(api_key_header)):
+    """Verify API key if one is configured in environment"""
+    if not API_KEY:
+        # No API key configured, allow all requests (development mode)
+        return None
+    if api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+    return api_key
+
+
+# Create the main app
+app = FastAPI(
+    title="Kwanya - Hausa Conversational AI",
+    lifespan=lifespan,
+)
+
+# Create a router with the /api prefix and API key auth
+api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
 
 # ==================== MODELS ====================
@@ -220,7 +176,7 @@ class Message(BaseModel):
     role: str  # 'user' or 'assistant'
     content: str
     audio_url: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Conversation(BaseModel):
@@ -228,8 +184,8 @@ class Conversation(BaseModel):
     user_id: str
     title: str = "New Conversation"
     language: str = "ha"  # Hausa by default
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TranscriptionRequest(BaseModel):
@@ -244,52 +200,118 @@ class ChatRequest(BaseModel):
     language: str = "ha"
 
 
-class TTSRequest(BaseModel):
-    text: str
-    language: str = "ha"
-
-
 class ConversationCreate(BaseModel):
     user_id: str
     language: str = "ha"
 
 
-# ==================== OPTIMIZED TTS SYNTHESIS ====================
+# ==================== USER & AUTH MODELS ====================
 
-def synthesize_speech_optimized(text: str) -> tuple:
-    """
-    Optimized TTS synthesis using:
-    - Fixed speaker (spk_f_1)
-    - Pre-computed embedding
-    - torch.compile() acceleration
-    """
-    global speaker_embedding
-    
-    tts = get_twb_tts()
-    
-    # Convert text to lowercase (TWB Voice requirement)
-    text_lower = text.lower()
-    
-    # Use optimized synthesis with fixed speaker
-    with torch.inference_mode():  # Faster than torch.no_grad()
-        wav = tts.synthesizer.tts(
-            text=text_lower,
-            speaker_name=FIXED_SPEAKER
-        )
-    
-    # Convert to numpy array
-    wav_array = np.array(wav, dtype=np.float32)
-    
-    # Get original sample rate (24 kHz for TWB Voice)
-    original_sample_rate = tts.synthesizer.output_sample_rate
-    
-    # Downsample to 16kHz for faster transmission and smaller file size
-    target_sample_rate = 16000
-    if original_sample_rate != target_sample_rate:
-        num_samples = int(len(wav_array) * target_sample_rate / original_sample_rate)
-        wav_array = signal.resample(wav_array, num_samples)
-    
-    return wav_array, target_sample_rate
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    phone: Optional[str] = None
+    email: str
+    display_name: Optional[str] = None
+    auth_provider: str  # "phone", "email", "google"
+    password_hash: Optional[str] = None
+    google_id: Optional[str] = None
+    is_phone_verified: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PhoneSignupRequest(BaseModel):
+    phone: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class EmailSignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class GoogleSignupRequest(BaseModel):
+    google_token: str
+    display_name: Optional[str] = None
+
+
+class SigninRequest(BaseModel):
+    identifier: str  # phone or email
+    password: str
+
+
+class GoogleSigninRequest(BaseModel):
+    google_token: str
+
+
+class VerifyOTPRequest(BaseModel):
+    phone: str
+    otp: str
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
+# ==================== AUTH HELPERS ====================
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+
+def create_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jose_jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_user(authorization: Optional[str] = None):
+    """Extract and verify current user from JWT token"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:]
+    try:
+        payload = jose_jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        return user
+    except JWTError:
+        return None
+
+
+def generate_email_from_phone(phone: str) -> str:
+    """Generate an email address from phone number using trulib.com domain"""
+    clean_phone = re.sub(r'[^\d]', '', phone)
+    return f"{clean_phone}@trulib.com"
+
+
+def generate_otp() -> str:
+    """Generate a 6-digit OTP"""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def sanitize_user(user: dict) -> dict:
+    """Return safe user data (no password hash)"""
+    return {
+        "id": user["id"],
+        "phone": user.get("phone"),
+        "email": user["email"],
+        "display_name": user.get("display_name"),
+        "auth_provider": user["auth_provider"],
+        "is_phone_verified": user.get("is_phone_verified", False),
+        "created_at": user.get("created_at"),
+    }
 
 
 # ==================== SPEECH TO TEXT ENDPOINT (Abkrs1/Hausa-ASR-copy) ====================
@@ -317,7 +339,6 @@ async def transcribe_audio(
         wav_path = wav_temp.name
         wav_temp.close()
         
-        import subprocess
         try:
             # Use ffmpeg to convert M4A to 16kHz mono WAV
             result = subprocess.run([
@@ -339,7 +360,7 @@ async def transcribe_audio(
             raise Exception("FFmpeg not found. Please install ffmpeg.")
         
         # Transcribe using Hausa ASR in thread pool
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         transcribed_text = await loop.run_in_executor(
             asr_executor,
             transcribe_hausa_audio_sync,
@@ -350,7 +371,7 @@ async def transcribe_audio(
         try:
             os.unlink(temp_path)
             os.unlink(wav_path)
-        except:
+        except OSError:
             pass
         
         # Save message to database
@@ -360,12 +381,12 @@ async def transcribe_audio(
             content=transcribed_text
         )
         
-        await db.messages.insert_one(message.dict())
+        await db.messages.insert_one(message.model_dump())
         
         # Update conversation timestamp
         await db.conversations.update_one(
             {"id": conversation_id},
-            {"$set": {"updated_at": datetime.utcnow()}}
+            {"$set": {"updated_at": datetime.now(timezone.utc)}}
         )
         
         logger.info(f"Transcription successful: {transcribed_text[:50]}...")
@@ -388,12 +409,20 @@ async def chat(request: ChatRequest):
     """Generate conversational AI response using Google Gemini"""
     try:
         logger.info(f"Chat request for conversation: {request.conversation_id}")
-        
+
+        # Save user message to database
+        user_msg = Message(
+            conversation_id=request.conversation_id,
+            role="user",
+            content=request.message
+        )
+        await db.messages.insert_one(user_msg.model_dump())
+
         # Get conversation history
         messages = await db.messages.find(
             {"conversation_id": request.conversation_id}
         ).sort("timestamp", 1).to_list(100)
-        
+
         # Initialize Gemini chat
         system_message = """You are a helpful AI assistant that speaks Hausa language.
 You are friendly, knowledgeable, and culturally aware of West African contexts, particularly Nigeria.
@@ -422,12 +451,12 @@ Do not introduce yourself or mention your name; answer directly."""
             content=response
         )
         
-        await db.messages.insert_one(assistant_message.dict())
+        await db.messages.insert_one(assistant_message.model_dump())
         
         # Update conversation
         await db.conversations.update_one(
             {"id": request.conversation_id},
-            {"$set": {"updated_at": datetime.utcnow()}}
+            {"$set": {"updated_at": datetime.now(timezone.utc)}}
         )
         
         logger.info(f"Chat response generated: {response[:50]}...")
@@ -435,95 +464,13 @@ Do not introduce yourself or mention your name; answer directly."""
         return {
             "success": True,
             "response": response,
-            "message_id": assistant_message.id
+            "message_id": assistant_message.id,
+            "user_message_id": user_msg.id
         }
-        
+
     except Exception as e:
         logger.error(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
-
-
-# ==================== TEXT TO SPEECH ENDPOINT (FULLY OPTIMIZED) ====================
-
-@api_router.post("/text-to-speech")
-async def text_to_speech(request: TTSRequest):
-    """
-    Convert text to speech using TWB Voice Hausa TTS (Fully Optimized)
-    
-    Optimizations applied:
-    - Single speaker mode (spk_f_1 - female voice)
-    - Pre-computed speaker embedding
-    - torch.compile() acceleration
-    - torch.inference_mode() for faster inference
-    - Audio downsampling (16kHz)
-    - Response caching
-    """
-    try:
-        text = request.text
-        logger.info(f"TTS request for text ({len(text)} chars): {text[:50]}...")
-        
-        # Check cache first (using fixed speaker)
-        cached_audio = await db.audio_cache.find_one({
-            "text": text.lower(),
-            "language": "ha",
-            "voice": f"twb-voice-{FIXED_SPEAKER}"
-        })
-        
-        if cached_audio:
-            logger.info("Returning cached audio")
-            return {
-                "success": True,
-                "audio_content": cached_audio["audio_content"],
-                "cached": True,
-                "tts_engine": "twb-voice-hausa-tts-optimized",
-                "speaker": FIXED_SPEAKER
-            }
-        
-        # Run optimized TTS in thread pool
-        loop = asyncio.get_event_loop()
-        wav_array, sample_rate = await loop.run_in_executor(
-            tts_executor,
-            synthesize_speech_optimized,
-            text
-        )
-        
-        # Save to WAV bytes
-        wav_buffer = io.BytesIO()
-        wavfile.write(wav_buffer, sample_rate, wav_array)
-        wav_bytes = wav_buffer.getvalue()
-        
-        # Convert to base64
-        audio_content = base64.b64encode(wav_bytes).decode('utf-8')
-        
-        # Cache the audio (only if not too large for MongoDB)
-        audio_size = len(audio_content)
-        if audio_size < 14 * 1024 * 1024:  # Less than 14MB
-            try:
-                await db.audio_cache.insert_one({
-                    "text": text.lower(),
-                    "language": "ha",
-                    "voice": f"twb-voice-{FIXED_SPEAKER}",
-                    "audio_content": audio_content,
-                    "created_at": datetime.utcnow()
-                })
-                logger.info(f"TTS audio generated and cached ({audio_size} bytes)")
-            except Exception as cache_error:
-                logger.warning(f"Failed to cache audio: {cache_error}")
-        else:
-            logger.info(f"TTS audio generated but too large to cache ({audio_size} bytes)")
-        
-        return {
-            "success": True,
-            "audio_content": audio_content,
-            "cached": False,
-            "tts_engine": "twb-voice-hausa-tts-optimized",
-            "speaker": FIXED_SPEAKER,
-            "sample_rate": sample_rate
-        }
-        
-    except Exception as e:
-        logger.error(f"TTS error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
 
 
 # ==================== CONVERSATION MANAGEMENT ====================
@@ -535,7 +482,7 @@ async def create_conversation(input: ConversationCreate):
         user_id=input.user_id,
         language=input.language
     )
-    await db.conversations.insert_one(conversation.dict())
+    await db.conversations.insert_one(conversation.model_dump())
     return conversation
 
 
@@ -556,7 +503,7 @@ class ConversationUpdate(BaseModel):
 @api_router.patch("/conversations/{conversation_id}")
 async def update_conversation(conversation_id: str, update: ConversationUpdate):
     """Update a conversation (e.g., rename title)"""
-    update_data = {"updated_at": datetime.utcnow()}
+    update_data = {"updated_at": datetime.now(timezone.utc)}
     if update.title:
         update_data["title"] = update.title
     
@@ -587,72 +534,307 @@ async def delete_conversation(conversation_id: str):
     return {"success": True, "message": "Conversation deleted"}
 
 
+# ==================== AUTH ENDPOINTS ====================
+
+auth_router = APIRouter(prefix="/api/auth")
+
+
+@auth_router.post("/signup/phone")
+async def signup_with_phone(request: PhoneSignupRequest):
+    """Sign up with phone number - auto-generates email at trulib.com"""
+    # Validate phone format (basic check)
+    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    if len(clean_phone) < 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number")
+
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    # Check if phone already exists
+    existing = await db.users.find_one({"phone": clean_phone})
+    if existing:
+        raise HTTPException(status_code=400, detail="Phone number already registered")
+
+    # Generate email from phone number
+    email = generate_email_from_phone(clean_phone)
+
+    user = User(
+        phone=clean_phone,
+        email=email,
+        display_name=request.display_name or clean_phone,
+        auth_provider="phone",
+        password_hash=hash_password(request.password),
+    )
+
+    await db.users.insert_one(user.model_dump())
+
+    # Generate OTP for phone verification
+    otp = generate_otp()
+    await db.otps.insert_one({
+        "phone": clean_phone,
+        "otp": otp,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+    })
+
+    logger.info(f"OTP for {clean_phone}: {otp}")  # In production, send via SMS
+
+    token = create_token(user.id)
+
+    return {
+        "success": True,
+        "token": token,
+        "user": sanitize_user(user.model_dump()),
+        "generated_email": email,
+        "otp_sent": True,
+        "message": f"Account created. Auto-generated email: {email}",
+    }
+
+
+@auth_router.post("/signup/email")
+async def signup_with_email(request: EmailSignupRequest):
+    """Sign up with email and password"""
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    # Check if email already exists
+    existing = await db.users.find_one({"email": request.email.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        email=request.email.lower(),
+        display_name=request.display_name or request.email.split("@")[0],
+        auth_provider="email",
+        password_hash=hash_password(request.password),
+    )
+
+    await db.users.insert_one(user.model_dump())
+    token = create_token(user.id)
+
+    return {
+        "success": True,
+        "token": token,
+        "user": sanitize_user(user.model_dump()),
+    }
+
+
+@auth_router.post("/signup/google")
+async def signup_with_google(request: GoogleSignupRequest):
+    """Sign up with Google OAuth token"""
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+
+        GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+        if not GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="Google sign-in not configured")
+
+        idinfo = id_token.verify_oauth2_token(
+            request.google_token, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+
+        google_id = idinfo["sub"]
+        email = idinfo.get("email", "")
+        name = idinfo.get("name", "")
+
+        # Check if Google account already linked
+        existing = await db.users.find_one({"google_id": google_id})
+        if existing:
+            raise HTTPException(status_code=400, detail="Google account already registered. Please sign in.")
+
+        existing_email = await db.users.find_one({"email": email})
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already registered with another method")
+
+        user = User(
+            email=email,
+            display_name=name or request.display_name,
+            auth_provider="google",
+            google_id=google_id,
+        )
+
+        await db.users.insert_one(user.model_dump())
+        token = create_token(user.id)
+
+        return {
+            "success": True,
+            "token": token,
+            "user": sanitize_user(user.model_dump()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google signup error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Google authentication failed: {str(e)}")
+
+
+@auth_router.post("/signin")
+async def signin(request: SigninRequest):
+    """Sign in with phone or email + password"""
+    identifier = request.identifier.strip()
+
+    user = await db.users.find_one({
+        "$or": [
+            {"phone": identifier},
+            {"email": identifier.lower()},
+        ]
+    })
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="This account uses Google sign-in")
+
+    if not verify_password(request.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_token(user["id"])
+
+    return {
+        "success": True,
+        "token": token,
+        "user": sanitize_user(user),
+    }
+
+
+@auth_router.post("/signin/google")
+async def signin_with_google(request: GoogleSigninRequest):
+    """Sign in with Google OAuth token"""
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+
+        GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+        if not GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="Google sign-in not configured")
+
+        idinfo = id_token.verify_oauth2_token(
+            request.google_token, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+
+        google_id = idinfo["sub"]
+
+        user = await db.users.find_one({"google_id": google_id})
+        if not user:
+            raise HTTPException(status_code=401, detail="No account found. Please sign up first.")
+
+        token = create_token(user["id"])
+
+        return {
+            "success": True,
+            "token": token,
+            "user": sanitize_user(user),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google signin error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Google authentication failed: {str(e)}")
+
+
+@auth_router.post("/verify-otp")
+async def verify_otp(request: VerifyOTPRequest):
+    """Verify phone OTP code"""
+    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+
+    otp_record = await db.otps.find_one({
+        "phone": clean_phone,
+        "otp": request.otp,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
+
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    # Mark phone as verified
+    await db.users.update_one(
+        {"phone": clean_phone},
+        {"$set": {"is_phone_verified": True, "updated_at": datetime.now(timezone.utc)}}
+    )
+
+    # Clean up used OTP
+    await db.otps.delete_many({"phone": clean_phone})
+
+    return {"success": True, "message": "Phone number verified"}
+
+
+@auth_router.get("/me")
+async def get_me(authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False))):
+    """Get current authenticated user"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return {
+        "success": True,
+        "user": sanitize_user(user),
+    }
+
+
+@auth_router.patch("/profile")
+async def update_profile(
+    update: UpdateProfileRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Update user profile"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    update_data = {"updated_at": datetime.now(timezone.utc)}
+    if update.display_name:
+        update_data["display_name"] = update.display_name
+
+    await db.users.update_one({"id": user["id"]}, {"$set": update_data})
+
+    return {"success": True, "message": "Profile updated"}
+
+
+@auth_router.post("/signout")
+async def signout():
+    """Sign out (client-side token removal)"""
+    return {"success": True, "message": "Signed out successfully"}
+
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/health")
 async def health_check():
     """Health check endpoint"""
+    # Actually ping MongoDB to verify connectivity
+    mongo_status = "disconnected"
+    try:
+        await client.admin.command("ping")
+        mongo_status = "connected"
+    except Exception:
+        mongo_status = "disconnected"
+
     return {
-        "status": "healthy",
+        "status": "healthy" if mongo_status == "connected" else "degraded",
         "services": {
-            "mongodb": "connected" if client else "disconnected",
+            "mongodb": mongo_status,
             "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
             "gemini": "configured" if os.environ.get('EMERGENT_LLM_KEY') else "not configured",
-            "tts": "twb-voice-hausa-tts (CLEAR-Global/TWB-Voice-Hausa-TTS-1.0)"
         },
         "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
-        "tts_engine": "TWB Voice Hausa TTS (Fully Optimized)",
-        "tts_speaker": f"{FIXED_SPEAKER} (female voice - locked)",
-        "optimizations": [
-            "Hausa-specific ASR model",
-            "Single speaker TTS mode (spk_f_1)",
-            "Pre-computed speaker embedding",
-            "torch.compile() acceleration",
-            "torch.inference_mode()",
-            "Audio downsampling (16kHz)",
-            "Response caching",
-            "Model preloading at startup"
-        ]
     }
 
 
-# ==================== STARTUP EVENT ====================
-
-@app.on_event("startup")
-async def startup_event():
-    """Preload TTS model with all optimizations on startup"""
-    logger.info("Preloading optimized TWB Voice TTS model...")
-    try:
-        # Load model in background thread
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(tts_executor, get_twb_tts)
-        logger.info("Optimized TWB Voice TTS model preloaded successfully!")
-        
-        # Warm up the model with a short text (helps torch.compile)
-        logger.info("Warming up model...")
-        await loop.run_in_executor(
-            tts_executor,
-            synthesize_speech_optimized,
-            "sannu"
-        )
-        logger.info("Model warmup complete!")
-    except Exception as e:
-        logger.error(f"Failed to preload TTS model: {e}")
-
-
-# Include the router in the main app
+# Include the routers in the main app
 app.include_router(api_router)
+app.include_router(auth_router)
+
+# CORS - restrict to known origins (allow all in development via env var)
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
+if not allowed_origins or allowed_origins == [""]:
+    allowed_origins = ["http://localhost:8081", "http://localhost:19006"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-    tts_executor.shutdown(wait=False)
