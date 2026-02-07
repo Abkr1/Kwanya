@@ -400,20 +400,16 @@ export default function AccountScreen() {
         <View style={styles.infoSection}>
           <Text style={styles.sectionTitle}>Account Information</Text>
           <View style={styles.infoCard}>
-            {/* Email */}
-            <View style={[styles.infoRow, styles.infoRowBorder]}>
-              <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Email</Text>
-                <Text style={styles.infoValue}>{user.email}</Text>
-              </View>
-              {user.auth_provider === 'phone' && (
-                <View style={styles.verifiedBadge}>
-                  <Ionicons name="sparkles-outline" size={12} color={palette.textSubtle} />
-                  <Text style={styles.unverifiedText}>Auto-generated</Text>
+            {/* Email - only show for email/google signups */}
+            {user.auth_provider !== 'phone' && (
+              <View style={[styles.infoRow, styles.infoRowBorder]}>
+                <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue}>{user.email}</Text>
                 </View>
-              )}
-            </View>
+              </View>
+            )}
 
             {/* Phone */}
             {user.phone && (

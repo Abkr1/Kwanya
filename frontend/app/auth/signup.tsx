@@ -64,20 +64,7 @@ export default function SignupScreen() {
     setIsLoading(false);
 
     if (result.success) {
-      Alert.alert(
-        'Account Created',
-        `Your auto-generated email: ${result.generatedEmail}\n\nYou can use this email or your phone number to sign in.`,
-        [
-          {
-            text: 'Verify Phone',
-            onPress: () => router.replace({ pathname: '/auth/verify-phone', params: { phone: phone.trim() } }),
-          },
-          {
-            text: 'Continue',
-            onPress: () => router.replace('/'),
-          },
-        ]
-      );
+      router.replace({ pathname: '/auth/verify-phone', params: { phone: phone.trim() } });
     } else {
       Alert.alert('Sign Up Failed', result.error || 'Please try again');
     }
@@ -300,21 +287,6 @@ export default function SignupScreen() {
       fontWeight: '700',
       color: palette.text,
     },
-    autoEmailNote: {
-      backgroundColor: palette.surfaceAlt,
-      borderRadius: 10,
-      padding: 12,
-      marginBottom: 16,
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-    },
-    autoEmailText: {
-      flex: 1,
-      fontSize: 13,
-      color: palette.textSubtle,
-      marginLeft: 8,
-      lineHeight: 18,
-    },
   }), [palette, insets]);
 
   return (
@@ -362,16 +334,6 @@ export default function SignupScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-
-          {/* Auto-email note for phone signup */}
-          {mode === 'phone' && (
-            <View style={styles.autoEmailNote}>
-              <Ionicons name="information-circle-outline" size={18} color={palette.textSubtle} />
-              <Text style={styles.autoEmailText}>
-                An email address will be automatically created for you when you sign up with your phone number.
-              </Text>
-            </View>
-          )}
 
           {/* Display Name */}
           <View style={styles.inputGroup}>
