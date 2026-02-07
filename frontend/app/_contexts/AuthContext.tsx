@@ -21,7 +21,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  signUpWithPhone: (phone: string, password: string, displayName?: string) => Promise<{ success: boolean; error?: string; generatedEmail?: string }>;
+  signUpWithPhone: (phone: string, password: string, displayName?: string) => Promise<{ success: boolean; error?: string }>;
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<{ success: boolean; error?: string }>;
   signUpWithGoogle: (googleToken: string, displayName?: string) => Promise<{ success: boolean; error?: string }>;
   signIn: (identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (response.data.success) {
         await saveAuth(response.data.token, response.data.user);
-        return { success: true, generatedEmail: response.data.generated_email };
+        return { success: true };
       }
       return { success: false, error: 'Signup failed' };
     } catch (error: any) {
