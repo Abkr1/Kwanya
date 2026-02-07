@@ -19,7 +19,7 @@ import {
   Easing,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import { Audio } from 'expo-av';
 import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -83,9 +83,6 @@ export default function KwanyaApp() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [isAudioPaused, setIsAudioPaused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
@@ -97,14 +94,12 @@ export default function KwanyaApp() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
   const sidebarWidth = Math.min(Dimensions.get('window').width * 0.8, 320);
   const sidebarTranslateX = useRef(new Animated.Value(-sidebarWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  // Keep refs in sync with state
+  // Keep ref in sync with state
   useEffect(() => { recordingRef.current = recording; }, [recording]);
-  useEffect(() => { soundRef.current = sound; }, [sound]);
 
   // Load persisted userId on mount
   useEffect(() => {
@@ -143,9 +138,6 @@ export default function KwanyaApp() {
     return () => {
       if (recordingRef.current) {
         recordingRef.current.unloadAsync();
-      }
-      if (soundRef.current) {
-        soundRef.current.unloadAsync();
       }
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -447,20 +439,8 @@ export default function KwanyaApp() {
       abortControllerRef.current.abort();
     }
 
-    if (soundRef.current) {
-      try {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        setSound(null);
-      } catch (_e) {
-        // Ignore errors during cleanup
-      }
-    }
-
     cancelledRef.current = true;
     setIsLoading(false);
-    setIsPlayingAudio(false);
-    setIsAudioPaused(false);
   };
 
   const getAIResponse = async (userMessage: string) => {
@@ -492,11 +472,6 @@ export default function KwanyaApp() {
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
-
-        // Generate and play TTS for assistant response
-        if (!cancelledRef.current) {
-          await playTextToSpeech(response.data.response);
-        }
       }
 
     } catch (error) {
@@ -510,83 +485,6 @@ export default function KwanyaApp() {
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
-    }
-  };
-
-  const playTextToSpeech = async (text: string) => {
-    if (cancelledRef.current) return;
-
-    try {
-      const response = await axios.post(`${BACKEND_URL}/api/text-to-speech`, {
-        text,
-        language: 'ha',
-      });
-
-      if (cancelledRef.current) return;
-
-      if (response.data.success) {
-        const audioContent = response.data.audio_content;
-        const base64Audio = `data:audio/wav;base64,${audioContent}`;
-
-        if (soundRef.current) {
-          await soundRef.current.unloadAsync();
-        }
-
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: base64Audio },
-          { shouldPlay: true }
-        );
-
-        setSound(newSound);
-
-        newSound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
-          if (status.isLoaded) {
-            if (status.isPlaying) {
-              setIsPlayingAudio(true);
-            }
-            if (status.didJustFinish) {
-              setIsPlayingAudio(false);
-              setIsAudioPaused(false);
-            }
-          }
-        });
-      }
-
-    } catch (error) {
-      console.error('TTS error:', error);
-      setIsPlayingAudio(false);
-    }
-  };
-
-  const stopAudio = async () => {
-    try {
-      if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        setSound(null);
-      }
-      setIsPlayingAudio(false);
-      setIsAudioPaused(false);
-    } catch (error) {
-      console.error('Error stopping audio:', error);
-      setIsPlayingAudio(false);
-      setIsAudioPaused(false);
-    }
-  };
-
-  const togglePauseAudio = async () => {
-    try {
-      if (soundRef.current) {
-        if (isAudioPaused) {
-          await soundRef.current.playAsync();
-          setIsAudioPaused(false);
-        } else {
-          await soundRef.current.pauseAsync();
-          setIsAudioPaused(true);
-        }
-      }
-    } catch (error) {
-      console.error('Error toggling audio pause:', error);
     }
   };
 
@@ -1055,66 +953,6 @@ export default function KwanyaApp() {
       color: palette.text,
       fontWeight: '600',
     },
-    audioPlayingContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      backgroundColor: palette.surface,
-      borderTopWidth: 1,
-      borderTopColor: palette.border,
-    },
-    audioPlayingIndicator: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    audioPlayingText: {
-      marginLeft: 8,
-      fontSize: 14,
-      color: palette.textMuted,
-      fontWeight: '500',
-    },
-    audioPlayingTextDark: {
-      color: palette.textMuted,
-    },
-    audioControlButtons: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    pauseAudioButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      backgroundColor: palette.bg,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: palette.text,
-    },
-    pauseAudioText: {
-      marginLeft: 4,
-      fontSize: 14,
-      color: palette.text,
-      fontWeight: '600',
-    },
-    stopAudioButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      backgroundColor: palette.bg,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: palette.text,
-    },
-    stopAudioText: {
-      marginLeft: 4,
-      fontSize: 14,
-      color: palette.text,
-      fontWeight: '600',
-    },
   }), [palette, insets, keyboardVisible]);
 
   // Don't render until userId is loaded
@@ -1350,34 +1188,6 @@ export default function KwanyaApp() {
                 <Ionicons name="stop-circle" size={24} color={palette.text} />
                 <Text style={styles.stopGeneratingText}>Stop</Text>
               </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Audio Playing Indicator with Pause/Play and Stop Buttons */}
-          {isPlayingAudio && (
-            <View style={styles.audioPlayingContainer}>
-              <View style={styles.audioPlayingIndicator}>
-                <Ionicons name={isAudioPaused ? "volume-mute" : "volume-high"} size={20} color={palette.text} />
-                <Text style={[styles.audioPlayingText, isDark && styles.audioPlayingTextDark]}>
-                  {isAudioPaused ? 'Paused' : 'Playing audio...'}
-                </Text>
-              </View>
-              <View style={styles.audioControlButtons}>
-                <TouchableOpacity
-                  style={styles.pauseAudioButton}
-                  onPress={togglePauseAudio}
-                >
-                  <Ionicons name={isAudioPaused ? "play-circle" : "pause-circle"} size={28} color={palette.text} />
-                  <Text style={styles.pauseAudioText}>{isAudioPaused ? 'Play' : 'Pause'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.stopAudioButton}
-                  onPress={stopAudio}
-                >
-                  <Ionicons name="stop-circle" size={28} color={palette.text} />
-                  <Text style={styles.stopAudioText}>Stop</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           )}
 
