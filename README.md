@@ -1,6 +1,6 @@
 # Kwanya - Hausa Conversational AI App
 
-**Kwanya** (meaning "What is it?" in Hausa) is a modern conversational AI application designed to support users primarily in the Hausa language. The app features a clean, ChatGPT-like interface with both text and voice input/output capabilities.
+**Kwanya** (meaning "Brain" in Hausa) is a modern conversational AI application designed to support users primarily in the Hausa language. The app features a clean, ChatGPT-like interface with both text and voice input/output capabilities.
 
 ## Features
 
