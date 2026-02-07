@@ -24,6 +24,8 @@ import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../contexts/AuthContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 const USER_ID_STORAGE_KEY = 'kwanya_user_id';
@@ -57,6 +59,8 @@ const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpaci
 export default function KwanyaApp() {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { user, isAuthenticated } = useAuth();
   const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
   const isDark = themePreference === 'system' ? colorScheme === 'dark' : themePreference === 'dark';
 
@@ -101,10 +105,15 @@ export default function KwanyaApp() {
   // Keep ref in sync with state
   useEffect(() => { recordingRef.current = recording; }, [recording]);
 
-  // Load persisted userId on mount
+  // Use authenticated user ID when available, otherwise fall back to anonymous ID
   useEffect(() => {
     const loadOrCreateUserId = async () => {
       try {
+        if (isAuthenticated && user) {
+          setUserId(user.id);
+          await AsyncStorage.setItem(USER_ID_STORAGE_KEY, user.id);
+          return;
+        }
         let storedId = await AsyncStorage.getItem(USER_ID_STORAGE_KEY);
         if (!storedId) {
           storedId = 'user-' + Date.now();
@@ -117,7 +126,7 @@ export default function KwanyaApp() {
       }
     };
     loadOrCreateUserId();
-  }, []);
+  }, [isAuthenticated, user]);
 
   // Initialize app once userId is ready
   useEffect(() => {
@@ -1014,9 +1023,29 @@ export default function KwanyaApp() {
 
             {/* Menu Options */}
             <View style={styles.menuOptions}>
-              <TouchableOpacity style={styles.menuOption}>
+              <TouchableOpacity
+                style={styles.menuOption}
+                onPress={() => {
+                  setSidebarVisible(false);
+                  router.push('/account');
+                }}
+              >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
                 <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Account</Text>
+                <View style={styles.menuOptionSpacer} />
+                {isAuthenticated && user ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{
+                      width: 8, height: 8, borderRadius: 4,
+                      backgroundColor: '#43a047', marginRight: 6,
+                    }} />
+                    <Text style={{ fontSize: 12, color: palette.textSubtle }}>
+                      {user.display_name || user.email?.split('@')[0] || ''}
+                    </Text>
+                  </View>
+                ) : (
+                  <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.menuOption}

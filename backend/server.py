@@ -12,13 +12,17 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import aiofiles
 import tempfile
 import asyncio
 from collections import defaultdict
 import time
 from concurrent.futures import ThreadPoolExecutor
+import bcrypt
+from jose import jwt as jose_jwt, JWTError
+import re
+import secrets
 
 # Hausa ASR (NCAIR1/Hausa-ASR) - Fine-tuned Whisper for Hausa
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
@@ -39,6 +43,11 @@ db = client[os.environ['DB_NAME']]
 
 # Thread pool for ASR processing
 asr_executor = ThreadPoolExecutor(max_workers=2)
+
+# JWT Configuration
+JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 24 * 30  # 30 days
 
 # ==================== HAUSA ASR MODEL (Abkrs1/Hausa-ASR-copy) ====================
 # Fine-tuned Whisper model specifically for Hausa language
@@ -194,6 +203,115 @@ class ChatRequest(BaseModel):
 class ConversationCreate(BaseModel):
     user_id: str
     language: str = "ha"
+
+
+# ==================== USER & AUTH MODELS ====================
+
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    phone: Optional[str] = None
+    email: str
+    display_name: Optional[str] = None
+    auth_provider: str  # "phone", "email", "google"
+    password_hash: Optional[str] = None
+    google_id: Optional[str] = None
+    is_phone_verified: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PhoneSignupRequest(BaseModel):
+    phone: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class EmailSignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class GoogleSignupRequest(BaseModel):
+    google_token: str
+    display_name: Optional[str] = None
+
+
+class SigninRequest(BaseModel):
+    identifier: str  # phone or email
+    password: str
+
+
+class GoogleSigninRequest(BaseModel):
+    google_token: str
+
+
+class VerifyOTPRequest(BaseModel):
+    phone: str
+    otp: str
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
+# ==================== AUTH HELPERS ====================
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+
+def create_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jose_jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_user(authorization: Optional[str] = None):
+    """Extract and verify current user from JWT token"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization[7:]
+    try:
+        payload = jose_jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        user = await db.users.find_one({"id": user_id}, {"_id": 0})
+        return user
+    except JWTError:
+        return None
+
+
+def generate_email_from_phone(phone: str) -> str:
+    """Generate an email address from phone number using trulib.com domain"""
+    clean_phone = re.sub(r'[^\d]', '', phone)
+    return f"{clean_phone}@trulib.com"
+
+
+def generate_otp() -> str:
+    """Generate a 6-digit OTP"""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def sanitize_user(user: dict) -> dict:
+    """Return safe user data (no password hash)"""
+    return {
+        "id": user["id"],
+        "phone": user.get("phone"),
+        "email": user["email"],
+        "display_name": user.get("display_name"),
+        "auth_provider": user["auth_provider"],
+        "is_phone_verified": user.get("is_phone_verified", False),
+        "created_at": user.get("created_at"),
+    }
 
 
 # ==================== SPEECH TO TEXT ENDPOINT (Abkrs1/Hausa-ASR-copy) ====================
@@ -416,6 +534,270 @@ async def delete_conversation(conversation_id: str):
     return {"success": True, "message": "Conversation deleted"}
 
 
+# ==================== AUTH ENDPOINTS ====================
+
+auth_router = APIRouter(prefix="/api/auth")
+
+
+@auth_router.post("/signup/phone")
+async def signup_with_phone(request: PhoneSignupRequest):
+    """Sign up with phone number - auto-generates email at trulib.com"""
+    # Validate phone format (basic check)
+    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    if len(clean_phone) < 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number")
+
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    # Check if phone already exists
+    existing = await db.users.find_one({"phone": clean_phone})
+    if existing:
+        raise HTTPException(status_code=400, detail="Phone number already registered")
+
+    # Generate email from phone number
+    email = generate_email_from_phone(clean_phone)
+
+    user = User(
+        phone=clean_phone,
+        email=email,
+        display_name=request.display_name or clean_phone,
+        auth_provider="phone",
+        password_hash=hash_password(request.password),
+    )
+
+    await db.users.insert_one(user.model_dump())
+
+    # Generate OTP for phone verification
+    otp = generate_otp()
+    await db.otps.insert_one({
+        "phone": clean_phone,
+        "otp": otp,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+    })
+
+    logger.info(f"OTP for {clean_phone}: {otp}")  # In production, send via SMS
+
+    token = create_token(user.id)
+
+    return {
+        "success": True,
+        "token": token,
+        "user": sanitize_user(user.model_dump()),
+        "generated_email": email,
+        "otp_sent": True,
+        "message": f"Account created. Auto-generated email: {email}",
+    }
+
+
+@auth_router.post("/signup/email")
+async def signup_with_email(request: EmailSignupRequest):
+    """Sign up with email and password"""
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    # Check if email already exists
+    existing = await db.users.find_one({"email": request.email.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        email=request.email.lower(),
+        display_name=request.display_name or request.email.split("@")[0],
+        auth_provider="email",
+        password_hash=hash_password(request.password),
+    )
+
+    await db.users.insert_one(user.model_dump())
+    token = create_token(user.id)
+
+    return {
+        "success": True,
+        "token": token,
+        "user": sanitize_user(user.model_dump()),
+    }
+
+
+@auth_router.post("/signup/google")
+async def signup_with_google(request: GoogleSignupRequest):
+    """Sign up with Google OAuth token"""
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+
+        GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+        if not GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="Google sign-in not configured")
+
+        idinfo = id_token.verify_oauth2_token(
+            request.google_token, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+
+        google_id = idinfo["sub"]
+        email = idinfo.get("email", "")
+        name = idinfo.get("name", "")
+
+        # Check if Google account already linked
+        existing = await db.users.find_one({"google_id": google_id})
+        if existing:
+            raise HTTPException(status_code=400, detail="Google account already registered. Please sign in.")
+
+        existing_email = await db.users.find_one({"email": email})
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already registered with another method")
+
+        user = User(
+            email=email,
+            display_name=name or request.display_name,
+            auth_provider="google",
+            google_id=google_id,
+        )
+
+        await db.users.insert_one(user.model_dump())
+        token = create_token(user.id)
+
+        return {
+            "success": True,
+            "token": token,
+            "user": sanitize_user(user.model_dump()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google signup error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Google authentication failed: {str(e)}")
+
+
+@auth_router.post("/signin")
+async def signin(request: SigninRequest):
+    """Sign in with phone or email + password"""
+    identifier = request.identifier.strip()
+
+    user = await db.users.find_one({
+        "$or": [
+            {"phone": identifier},
+            {"email": identifier.lower()},
+        ]
+    })
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    if not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="This account uses Google sign-in")
+
+    if not verify_password(request.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_token(user["id"])
+
+    return {
+        "success": True,
+        "token": token,
+        "user": sanitize_user(user),
+    }
+
+
+@auth_router.post("/signin/google")
+async def signin_with_google(request: GoogleSigninRequest):
+    """Sign in with Google OAuth token"""
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+
+        GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+        if not GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="Google sign-in not configured")
+
+        idinfo = id_token.verify_oauth2_token(
+            request.google_token, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+
+        google_id = idinfo["sub"]
+
+        user = await db.users.find_one({"google_id": google_id})
+        if not user:
+            raise HTTPException(status_code=401, detail="No account found. Please sign up first.")
+
+        token = create_token(user["id"])
+
+        return {
+            "success": True,
+            "token": token,
+            "user": sanitize_user(user),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google signin error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Google authentication failed: {str(e)}")
+
+
+@auth_router.post("/verify-otp")
+async def verify_otp(request: VerifyOTPRequest):
+    """Verify phone OTP code"""
+    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+
+    otp_record = await db.otps.find_one({
+        "phone": clean_phone,
+        "otp": request.otp,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
+
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    # Mark phone as verified
+    await db.users.update_one(
+        {"phone": clean_phone},
+        {"$set": {"is_phone_verified": True, "updated_at": datetime.now(timezone.utc)}}
+    )
+
+    # Clean up used OTP
+    await db.otps.delete_many({"phone": clean_phone})
+
+    return {"success": True, "message": "Phone number verified"}
+
+
+@auth_router.get("/me")
+async def get_me(authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False))):
+    """Get current authenticated user"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return {
+        "success": True,
+        "user": sanitize_user(user),
+    }
+
+
+@auth_router.patch("/profile")
+async def update_profile(
+    update: UpdateProfileRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Update user profile"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    update_data = {"updated_at": datetime.now(timezone.utc)}
+    if update.display_name:
+        update_data["display_name"] = update.display_name
+
+    await db.users.update_one({"id": user["id"]}, {"$set": update_data})
+
+    return {"success": True, "message": "Profile updated"}
+
+
+@auth_router.post("/signout")
+async def signout():
+    """Sign out (client-side token removal)"""
+    return {"success": True, "message": "Signed out successfully"}
+
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/health")
@@ -440,8 +822,9 @@ async def health_check():
     }
 
 
-# Include the router in the main app
+# Include the routers in the main app
 app.include_router(api_router)
+app.include_router(auth_router)
 
 # CORS - restrict to known origins (allow all in development via env var)
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
