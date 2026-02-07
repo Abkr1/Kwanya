@@ -1,0 +1,312 @@
+diff --git a/backend/server.py b/backend/server.py
+index 0b00fbb..64d8a5f 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -267,11 +267,12 @@ async def transcribe_audio(
+             await f.write(content)
+         
+         # Transcribe using Whisper
++        # Note: Hausa (ha) is not officially supported, so we let Whisper auto-detect
++        # It may still transcribe Hausa with reasonable accuracy
+         with open(temp_path, 'rb') as audio_file:
+             transcription = get_openai_client().audio.transcriptions.create(
+                 model="whisper-1",
+                 file=audio_file,
+-                language="ha",
+                 response_format="verbose_json"
+             )
+         
+diff --git a/model.patch b/model.patch
+index 1e2e813..e69de29 100644
+--- a/model.patch
++++ b/model.patch
+@@ -1,289 +0,0 @@
+-diff --git a/model.patch b/model.patch
+-index 653c01d..e69de29 100644
+---- a/model.patch
+-+++ b/model.patch
+-@@ -1,203 +0,0 @@
+--diff --git a/model.patch b/model.patch
+--index c95cd07..e69de29 100644
+----- a/model.patch
+--+++ b/model.patch
+--@@ -1,138 +0,0 @@
+---diff --git a/backend/server.py b/backend/server.py
+---index d3d66cd..24bb249 100644
+------ a/backend/server.py
+---+++ b/backend/server.py
+---@@ -316,7 +316,7 @@ async def create_conversation(input: ConversationCreate):
+--- async def get_conversations(user_id: str):
+---     """Get all conversations for a user"""
+---     conversations = await db.conversations.find(
+----        {"user_id": user_id}
+---+        {"user_id": user_id}, {"_id": 0}  # Exclude _id field to avoid ObjectId serialization issues
+---     ).sort("updated_at", -1).to_list(100)
+---     
+---     return {"success": True, "conversations": conversations}
+---@@ -326,7 +326,7 @@ async def get_conversations(user_id: str):
+--- async def get_messages(conversation_id: str):
+---     """Get all messages in a conversation"""
+---     messages = await db.messages.find(
+----        {"conversation_id": conversation_id}
+---+        {"conversation_id": conversation_id}, {"_id": 0}  # Exclude _id field to avoid ObjectId serialization issues
+---     ).sort("timestamp", 1).to_list(1000)
+---     
+---     return {"success": True, "messages": messages}
+---diff --git a/test_result.md b/test_result.md
+---index 187cba4..2b336f8 100644
+------ a/test_result.md
+---+++ b/test_result.md
+---@@ -100,4 +100,108 @@
+--- 
+--- #====================================================================================================
+--- # Testing Data - Main Agent and testing sub agent both should log testing data below this section
+----#====================================================================================================
+---\ No newline at end of file
+---+#====================================================================================================
+---+
+---+user_problem_statement: "Test the Kwanya backend API endpoints for the Hausa Conversational AI application"
+---+
+---+backend:
+---+  - task: "Health Check API"
+---+    implemented: true
+---+    working: true
+---+    file: "server.py"
+---+    stuck_count: 0
+---+    priority: "high"
+---+    needs_retesting: false
+---+    status_history:
+---+        - working: true
+---+          agent: "testing"
+---+          comment: "Health check endpoint working correctly. All services (mongodb, whisper, gemini, tts) are properly configured and connected."
+---+
+---+  - task: "Create Conversation API"
+---+    implemented: true
+---+    working: true
+---+    file: "server.py"
+---+    stuck_count: 0
+---+    priority: "high"
+---+    needs_retesting: false
+---+    status_history:
+---+        - working: true
+---+          agent: "testing"
+---+          comment: "Conversation creation working correctly. Successfully creates new conversations with UUID and returns proper response structure."
+---+
+---+  - task: "Chat Endpoint with Gemini AI"
+---+    implemented: true
+---+    working: true
+---+    file: "server.py"
+---+    stuck_count: 0
+---+    priority: "high"
+---+    needs_retesting: false
+---+    status_history:
+---+        - working: true
+---+          agent: "testing"
+---+          comment: "Chat endpoint working correctly. Gemini AI integration functional, responds appropriately in Hausa to user messages. AI responses are contextually appropriate."
+---+
+---+  - task: "Text-to-Speech API"
+---+    implemented: true
+---+    working: true
+---+    file: "server.py"
+---+    stuck_count: 1
+---+    priority: "high"
+---+    needs_retesting: false
+---+    status_history:
+---+        - working: false
+---+          agent: "testing"
+---+          comment: "Initial test failed - Google TTS does not support Hausa (ha-NG) voices. Voice 'ha-NG-Standard-A' does not exist."
+---+        - working: true
+---+          agent: "testing"
+---+          comment: "Fixed by using supported English voice (en-US-Standard-A). TTS API working correctly with proper audio generation and caching functionality. NOTE: Hausa TTS not available in Google Cloud TTS."
+---+
+---+  - task: "Get Conversations API"
+---+    implemented: true
+---+    working: true
+---+    file: "server.py"
+---+    stuck_count: 1
+---+    priority: "medium"
+---+    needs_retesting: false
+---+    status_history:
+---+        - working: false
+---+          agent: "testing"
+---+          comment: "Initial test failed due to MongoDB ObjectId serialization issues causing JSON encoding errors."
+---+        - working: true
+---+          agent: "testing"
+---+          comment: "Fixed by excluding _id field from MongoDB queries to avoid ObjectId serialization issues. API now returns conversations correctly."
+---+
+---+  - task: "Get Messages API"
+---+    implemented: true
+---+    working: true
+---+    file: "server.py"
+---+    stuck_count: 1
+---+    priority: "medium"
+---+    needs_retesting: false
+---+    status_history:
+---+        - working: false
+---+          agent: "testing"
+---+          comment: "Initial test failed due to MongoDB ObjectId serialization issues causing JSON encoding errors."
+---+        - working: true
+---+          agent: "testing"
+---+          comment: "Fixed by excluding _id field from MongoDB queries to avoid ObjectId serialization issues. API now returns messages correctly."
+---+
+---+frontend:
+---+  # No frontend testing performed as per instructions
+---+
+---+metadata:
+---+  created_by: "testing_agent"
+---+  version: "1.0"
+---+  test_sequence: 1
+---+  run_ui: false
+---+
+---+test_plan:
+---+  current_focus:
+---+    - "All backend API endpoints tested"
+---+  stuck_tasks: []
+---+  test_all: true
+---+  test_priority: "sequential"
+---+
+---+agent_communication:
+---+    - agent: "testing"
+---+      message: "Completed comprehensive backend API testing. All 6 endpoints tested successfully. Fixed 2 critical issues: 1) MongoDB ObjectId serialization by excluding _id fields, 2) TTS voice compatibility by using supported English voices instead of unavailable Hausa voices. All core functionality working correctly."
+---\ No newline at end of file
+--diff --git a/test_result.md b/test_result.md
+--index 2815c3c..9468ac1 100644
+----- a/test_result.md
+--+++ b/test_result.md
+--@@ -111,7 +111,7 @@ backend:
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--         - working: true
+--           agent: "testing"
+--@@ -119,6 +119,9 @@ backend:
+--         - working: "NA"
+--           agent: "main"
+--           comment: "Updated to reflect Meta MMS-TTS instead of Google TTS. Needs retesting."
+--+        - working: true
+--+          agent: "testing"
+--+          comment: "VERIFIED: Health check now correctly shows Meta MMS-TTS configuration. Services show 'tts: meta-mms-tts (facebook/mms-tts-hau)' and tts_engine: 'Meta MMS-TTS for Hausa'. All services healthy."
+-- 
+--   - task: "Create Conversation API"
+--     implemented: true
+--@@ -150,7 +153,7 @@ backend:
+--     file: "server.py"
+--     stuck_count: 0
+--     priority: "high"
+---    needs_retesting: true
+--+    needs_retesting: false
+--     status_history:
+--         - working: false
+--           agent: "testing"
+--@@ -161,6 +164,9 @@ backend:
+--         - working: true
+--           agent: "main"
+--           comment: "MAJOR UPDATE: Replaced Google TTS with Meta MMS-TTS (facebook/mms-tts-hau). Now supports native Hausa TTS! Model loaded locally using transformers library. Returns WAV audio in base64 format. Tested manually - working correctly."
+--+        - working: true
+--+          agent: "testing"
+--+          comment: "COMPREHENSIVE TEST PASSED: Meta MMS-TTS working perfectly! Tested with Hausa text 'Sannu, yaya kake?' - generates 57KB WAV audio, returns tts_engine: 'meta-mms-tts', proper caching functionality, valid WAV format with RIFF header. Native Hausa TTS now fully functional."
+-- 
+--   - task: "Get Conversations API"
+--     implemented: true
+--@@ -203,11 +209,13 @@ metadata:
+-- 
+-- test_plan:
+--   current_focus:
+---    - "All backend API endpoints tested"
+--+    - "All backend API endpoints tested and verified"
+--   stuck_tasks: []
+--   test_all: true
+--   test_priority: "sequential"
+-- 
+-- agent_communication:
+--     - agent: "testing"
+---      message: "Completed comprehensive backend API testing. All 6 endpoints tested successfully. Fixed 2 critical issues: 1) MongoDB ObjectId serialization by excluding _id fields, 2) TTS voice compatibility by using supported English voices instead of unavailable Hausa voices. All core functionality working correctly."
+--\ No newline at end of file
+--+      message: "Completed comprehensive backend API testing. All 6 endpoints tested successfully. Fixed 2 critical issues: 1) MongoDB ObjectId serialization by excluding _id fields, 2) TTS voice compatibility by using supported English voices instead of unavailable Hausa voices. All core functionality working correctly."
+--+    - agent: "testing"
+--+      message: "FINAL VERIFICATION COMPLETE: Meta MMS-TTS implementation fully tested and working perfectly. All 5 critical backend endpoints (Health Check, Create Conversation, Text-to-Speech, Get Conversations, Get Messages) are functioning correctly. Meta MMS-TTS generates native Hausa audio (57KB WAV files) with proper caching. Ready for production use."
+--\ No newline at end of file
+-diff --git a/test_result.md b/test_result.md
+-index 9468ac1..cb35e65 100644
+---- a/test_result.md
+-+++ b/test_result.md
+-@@ -102,7 +102,7 @@
+- # Testing Data - Main Agent and testing sub agent both should log testing data below this section
+- #====================================================================================================
+- 
+--user_problem_statement: "Test the Kwanya backend API endpoints for the Hausa Conversational AI application - NOW USING META MMS-TTS for native Hausa support"
+-+user_problem_statement: "Test the Kwanya backend API endpoints for the Hausa Conversational AI application - NOW USING TWB Voice Hausa TTS (CLEAR-Global/TWB-Voice-Hausa-TTS-1.0) with multi-speaker support"
+- 
+- backend:
+-   - task: "Health Check API"
+-@@ -122,6 +122,9 @@ backend:
+-         - working: true
+-           agent: "testing"
+-           comment: "VERIFIED: Health check now correctly shows Meta MMS-TTS configuration. Services show 'tts: meta-mms-tts (facebook/mms-tts-hau)' and tts_engine: 'Meta MMS-TTS for Hausa'. All services healthy."
+-+        - working: true
+-+          agent: "testing"
+-+          comment: "VERIFIED: Health check now correctly shows TWB Voice Hausa TTS configuration. Returns status 'healthy', tts_engine: 'TWB Voice Hausa TTS', and 3 speakers: spk_f_1 (female), spk_m_1 (male), spk_m_2 (male). All services healthy and properly configured."
+- 
+-   - task: "Create Conversation API"
+-     implemented: true
+-@@ -134,6 +137,9 @@ backend:
+-         - working: true
+-           agent: "testing"
+-           comment: "Conversation creation working correctly. Successfully creates new conversations with UUID and returns proper response structure."
+-+        - working: true
+-+          agent: "testing"
+-+          comment: "VERIFIED: Conversation creation working correctly with test-user-twb. Successfully creates conversations with proper UUID, user_id, title, language fields. Response structure validated."
+- 
+-   - task: "Chat Endpoint with Gemini AI"
+-     implemented: true
+-@@ -147,7 +153,7 @@ backend:
+-           agent: "testing"
+-           comment: "Chat endpoint working correctly. Gemini AI integration functional, responds appropriately in Hausa to user messages. AI responses are contextually appropriate."
+- 
+--  - task: "Text-to-Speech API (Meta MMS-TTS)"
+-+  - task: "Text-to-Speech API (TWB Voice Hausa TTS)"
+-     implemented: true
+-     working: true
+-     file: "server.py"
+-@@ -167,6 +173,9 @@ backend:
+-         - working: true
+-           agent: "testing"
+-           comment: "COMPREHENSIVE TEST PASSED: Meta MMS-TTS working perfectly! Tested with Hausa text 'Sannu, yaya kake?' - generates 57KB WAV audio, returns tts_engine: 'meta-mms-tts', proper caching functionality, valid WAV format with RIFF header. Native Hausa TTS now fully functional."
+-+        - working: true
+-+          agent: "testing"
+-+          comment: "COMPREHENSIVE TEST PASSED: TWB Voice Hausa TTS working perfectly! Tested with multiple speakers: Female (spk_f_1) generates 438KB WAV audio for 'Sannu, yaya kake?', Male (spk_m_1) generates 137KB WAV audio for 'Ina kwana'. Returns tts_engine: 'twb-voice-hausa-tts', proper multi-speaker support, caching functionality, valid WAV format. Native Hausa TTS with multi-speaker support fully functional."
+- 
+-   - task: "Get Conversations API"
+-     implemented: true
+-@@ -182,6 +191,9 @@ backend:
+-         - working: true
+-           agent: "testing"
+-           comment: "Fixed by excluding _id field from MongoDB queries to avoid ObjectId serialization issues. API now returns conversations correctly."
+-+        - working: true
+-+          agent: "testing"
+-+          comment: "VERIFIED: Get conversations working correctly for test-user-twb. Successfully retrieves conversations list with proper success field and conversation structure validation."
+- 
+-   - task: "Get Messages API"
+-     implemented: true
+-@@ -209,7 +221,7 @@ metadata:
+- 
+- test_plan:
+-   current_focus:
+--    - "All backend API endpoints tested and verified"
+-+    - "All backend API endpoints tested and verified with TWB Voice Hausa TTS"
+-   stuck_tasks: []
+-   test_all: true
+-   test_priority: "sequential"
+-@@ -218,4 +230,6 @@ agent_communication:
+-     - agent: "testing"
+-       message: "Completed comprehensive backend API testing. All 6 endpoints tested successfully. Fixed 2 critical issues: 1) MongoDB ObjectId serialization by excluding _id fields, 2) TTS voice compatibility by using supported English voices instead of unavailable Hausa voices. All core functionality working correctly."
+-     - agent: "testing"
+--      message: "FINAL VERIFICATION COMPLETE: Meta MMS-TTS implementation fully tested and working perfectly. All 5 critical backend endpoints (Health Check, Create Conversation, Text-to-Speech, Get Conversations, Get Messages) are functioning correctly. Meta MMS-TTS generates native Hausa audio (57KB WAV files) with proper caching. Ready for production use."
+-\ No newline at end of file
+-+      message: "FINAL VERIFICATION COMPLETE: Meta MMS-TTS implementation fully tested and working perfectly. All 5 critical backend endpoints (Health Check, Create Conversation, Text-to-Speech, Get Conversations, Get Messages) are functioning correctly. Meta MMS-TTS generates native Hausa audio (57KB WAV files) with proper caching. Ready for production use."
+-+    - agent: "testing"
+-+      message: "COMPREHENSIVE TWB VOICE HAUSA TTS TESTING COMPLETE: All 4 specified endpoints tested successfully. Health Check shows proper TWB Voice configuration with 3 speakers. TTS endpoint generates high-quality Hausa audio: Female speaker (438KB WAV), Male speaker (137KB WAV). Multi-speaker support fully functional. Conversation management working correctly. System ready for production with TWB Voice Hausa TTS."
+-\ No newline at end of file
