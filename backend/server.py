@@ -503,11 +503,22 @@ async def create_conversation(input: ConversationCreate):
 
 @api_router.get("/conversations/{user_id}")
 async def get_conversations(user_id: str):
-    """Get all conversations for a user"""
-    conversations = await db.conversations.find(
-        {"user_id": user_id}, {"_id": 0}
-    ).sort("updated_at", -1).to_list(100)
-    
+    """Get all conversations for a user that have at least one message"""
+    pipeline = [
+        {"$match": {"user_id": user_id}},
+        {"$lookup": {
+            "from": "messages",
+            "localField": "id",
+            "foreignField": "conversation_id",
+            "as": "msgs",
+        }},
+        {"$match": {"msgs": {"$ne": []}}},
+        {"$project": {"msgs": 0, "_id": 0}},
+        {"$sort": {"updated_at": -1}},
+        {"$limit": 100},
+    ]
+    conversations = await db.conversations.aggregate(pipeline).to_list(100)
+
     return {"success": True, "conversations": conversations}
 
 

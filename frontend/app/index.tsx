@@ -246,24 +246,29 @@ export default function KwanyaApp() {
       });
 
       await loadConversationHistory();
-      await createConversation();
     } catch (error) {
       console.error('Initialization error:', error);
       Alert.alert('Error', 'Failed to initialize app. Please check permissions.');
     }
   };
 
-  const createConversation = async () => {
+  const createConversation = async (): Promise<Conversation | null> => {
     try {
       const response = await axios.post(`${BACKEND_URL}/api/conversations`, {
         user_id: userId,
         language: 'ha',
       });
       setCurrentConversation(response.data);
-      await loadConversationHistory();
+      return response.data;
     } catch (error) {
       console.error('Failed to create conversation:', error);
+      return null;
     }
+  };
+
+  const ensureConversation = async (): Promise<Conversation | null> => {
+    if (currentConversation) return currentConversation;
+    return await createConversation();
   };
 
   const loadConversationHistory = async () => {
@@ -277,11 +282,10 @@ export default function KwanyaApp() {
     }
   };
 
-  const startNewChat = async () => {
+  const startNewChat = () => {
     setSidebarVisible(false);
     setMessages([]);
     setCurrentConversation(null);
-    await createConversation();
   };
 
   const loadConversation = async (conversation: Conversation) => {
@@ -372,7 +376,8 @@ export default function KwanyaApp() {
   };
 
   const transcribeAudio = async (audioUri: string) => {
-    if (!currentConversation) return;
+    const conversation = await ensureConversation();
+    if (!conversation) return;
 
     setIsLoading(true);
     try {
@@ -386,7 +391,7 @@ export default function KwanyaApp() {
 
       formData.append('audio', audioFile as unknown as Blob);
       formData.append('user_id', userId!);
-      formData.append('conversation_id', currentConversation.id);
+      formData.append('conversation_id', conversation.id);
 
       const response = await axios.post(
         `${BACKEND_URL}/api/speech-to-text`,
@@ -409,7 +414,7 @@ export default function KwanyaApp() {
         };
         setMessages((prev) => [...prev, userMessage]);
 
-        await getAIResponse(transcribedText);
+        await getAIResponse(transcribedText, conversation);
       }
 
     } catch (error) {
@@ -422,7 +427,10 @@ export default function KwanyaApp() {
   };
 
   const sendTextMessage = async () => {
-    if (!inputText.trim() || !currentConversation) return;
+    if (!inputText.trim()) return;
+
+    const conversation = await ensureConversation();
+    if (!conversation) return;
 
     const isFirstMessage = messages.length === 0;
     const userMessage: Message = {
@@ -437,10 +445,10 @@ export default function KwanyaApp() {
     setInputText('');
 
     if (isFirstMessage) {
-      await autoNameConversation(currentConversation.id, messageText);
+      await autoNameConversation(conversation.id, messageText);
     }
 
-    await getAIResponse(messageText);
+    await getAIResponse(messageText, conversation);
   };
 
   const stopGenerating = async () => {
@@ -452,8 +460,9 @@ export default function KwanyaApp() {
     setIsLoading(false);
   };
 
-  const getAIResponse = async (userMessage: string) => {
-    if (!currentConversation) return;
+  const getAIResponse = async (userMessage: string, conv?: Conversation) => {
+    const activeConversation = conv || currentConversation;
+    if (!activeConversation) return;
 
     abortControllerRef.current = new AbortController();
     cancelledRef.current = false;
@@ -462,7 +471,7 @@ export default function KwanyaApp() {
     try {
       // Backend /chat endpoint now saves the user message to DB
       const response = await axios.post(`${BACKEND_URL}/api/chat`, {
-        conversation_id: currentConversation.id,
+        conversation_id: activeConversation.id,
         user_id: userId,
         message: userMessage,
         language: 'ha',
