@@ -10,16 +10,15 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
+import { useTheme } from '../_contexts/ThemeContext';
 
 export default function SigninScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signIn, signInWithGoogle } = useAuth();
@@ -28,20 +27,6 @@ export default function SigninScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-
-  const palette = useMemo(() => ({
-    bg: isDark ? '#000000' : '#ffffff',
-    surface: isDark ? '#0d0d0d' : '#f7f7f7',
-    surfaceAlt: isDark ? '#151515' : '#f2f2f2',
-    text: isDark ? '#ffffff' : '#000000',
-    textMuted: isDark ? '#c7c7c7' : '#333333',
-    textSubtle: isDark ? '#9a9a9a' : '#666666',
-    border: isDark ? '#2a2a2a' : '#e5e5e5',
-    button: isDark ? '#ffffff' : '#000000',
-    buttonText: isDark ? '#000000' : '#ffffff',
-    disabled: isDark ? '#2f2f2f' : '#d9d9d9',
-    google: '#4285F4',
-  }), [isDark]);
 
   const handleSignin = async () => {
     if (!identifier.trim()) {
