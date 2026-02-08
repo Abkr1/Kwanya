@@ -11,11 +11,12 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
-  Modal,
   ScrollView,
   Dimensions,
   Animated,
   Easing,
+  BackHandler,
+  StatusBar,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Audio } from 'expo-av';
@@ -143,22 +144,22 @@ export default function KwanyaApp() {
   }, [userId]);
 
 
+  // Sidebar open/close animation
   useEffect(() => {
     if (sidebarVisible) {
       setSidebarMounted(true);
       sidebarTranslateX.setValue(-sidebarWidth);
       backdropOpacity.setValue(0);
       Animated.parallel([
-        Animated.timing(sidebarTranslateX, {
+        Animated.spring(sidebarTranslateX, {
           toValue: 0,
-          duration: 250,
-          easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
+          damping: 22,
+          stiffness: 220,
         }),
         Animated.timing(backdropOpacity, {
           toValue: 1,
           duration: 200,
-          easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
       ]).start();
@@ -169,14 +170,13 @@ export default function KwanyaApp() {
       Animated.parallel([
         Animated.timing(sidebarTranslateX, {
           toValue: -sidebarWidth,
-          duration: 200,
+          duration: 180,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(backdropOpacity, {
           toValue: 0,
           duration: 150,
-          easing: Easing.in(Easing.quad),
           useNativeDriver: true,
         }),
       ]).start(() => setSidebarMounted(false));
@@ -188,6 +188,16 @@ export default function KwanyaApp() {
     sidebarTranslateX,
     backdropOpacity,
   ]);
+
+  // Android back button closes sidebar
+  useEffect(() => {
+    if (!sidebarVisible) return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSidebarVisible(false);
+      return true;
+    });
+    return () => handler.remove();
+  }, [sidebarVisible]);
 
   const copyToClipboard = async (text: string, label: string) => {
     if (!text.trim()) {
@@ -603,11 +613,13 @@ export default function KwanyaApp() {
       width: 36,
     },
     sidebarOverlay: {
-      flex: 1,
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 100,
+      elevation: 100,
       flexDirection: 'row',
     },
     sidebarBackdrop: {
-      flex: 1,
+      ...StyleSheet.absoluteFillObject,
       backgroundColor: palette.overlay,
     },
     sidebar: {
@@ -622,6 +634,8 @@ export default function KwanyaApp() {
       paddingBottom: insets.bottom,
       borderRightWidth: 1,
       borderRightColor: palette.border,
+      zIndex: 101,
+      elevation: 101,
     },
     sidebarDark: {
       backgroundColor: palette.bg,
@@ -975,13 +989,8 @@ export default function KwanyaApp() {
         <View style={styles.headerRight} />
       </View>
 
-      {/* Sidebar Modal */}
-      <Modal
-        visible={sidebarMounted}
-        animationType="none"
-        transparent={true}
-        onRequestClose={() => setSidebarVisible(false)}
-      >
+      {/* Sidebar Overlay */}
+      {sidebarMounted && (
         <View style={styles.sidebarOverlay}>
           <AnimatedTouchableOpacity
             style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]}
@@ -1153,7 +1162,7 @@ export default function KwanyaApp() {
             </View>
           </Animated.View>
         </View>
-      </Modal>
+      )}
 
       {messages.length === 0 ? (
         /* Empty state - centered welcome and input */
