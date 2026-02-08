@@ -928,25 +928,9 @@ export default function KwanyaApp() {
     loadingContainer: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      justifyContent: 'center',
       paddingHorizontal: 16,
-      paddingVertical: 10,
-      backgroundColor: palette.surface,
-      borderTopWidth: 1,
-      borderTopColor: palette.border,
-    },
-    loadingIndicator: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    loadingText: {
-      marginLeft: 10,
-      fontSize: 14,
-      color: palette.textMuted,
-      fontWeight: '500',
-    },
-    loadingTextDark: {
-      color: palette.textMuted,
+      paddingVertical: 8,
     },
     stopGeneratingButton: {
       flexDirection: 'row',
@@ -1198,15 +1182,9 @@ export default function KwanyaApp() {
             showsVerticalScrollIndicator={true}
           />
 
-          {/* Loading Indicator with Stop Button */}
+          {/* Stop Button */}
           {isLoading && (
             <View style={styles.loadingContainer}>
-              <View style={styles.loadingIndicator}>
-                <ActivityIndicator size="small" color={palette.text} />
-                <Text style={[styles.loadingText, isDark && styles.loadingTextDark]}>
-                  Generating response...
-                </Text>
-              </View>
               <TouchableOpacity
                 style={styles.stopGeneratingButton}
                 onPress={stopGenerating}
