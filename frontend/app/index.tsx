@@ -832,35 +832,19 @@ export default function KwanyaApp() {
       color: palette.text,
     },
     messageTextDark: {},
-    centeredInputWrapper: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      top: 0,
+    emptyStateBody: {
+      flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
-      pointerEvents: 'box-none',
     },
     welcomeSection: {
       alignItems: 'center',
-      marginBottom: 32,
     },
     emptyText: {
       fontSize: 18,
       color: palette.textMuted,
       textAlign: 'center',
       marginTop: 16,
-    },
-    inputContainer: {
-      width: '90%',
-      maxWidth: 600,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      backgroundColor: palette.bg,
-      borderWidth: 1,
-      borderColor: palette.border,
-      borderRadius: 24,
     },
     bottomInputContainer: {
       paddingHorizontal: 16,
@@ -1149,19 +1133,24 @@ export default function KwanyaApp() {
       )}
 
       {messages.length === 0 ? (
-        /* Empty state - centered welcome and input */
-        <View style={styles.centeredInputWrapper}>
-          <View style={styles.welcomeSection}>
-            <Ionicons
-              name="chatbubbles-outline"
-              size={80}
-              color={palette.textSubtle}
-            />
-            <Text style={styles.emptyText}>Barka da zuwa!</Text>
+        /* Empty state - welcome centered, input at bottom */
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.emptyStateBody}>
+            <View style={styles.welcomeSection}>
+              <Ionicons
+                name="chatbubbles-outline"
+                size={80}
+                color={palette.textSubtle}
+              />
+              <Text style={styles.emptyText}>Barka da zuwa!</Text>
+            </View>
           </View>
 
-          {renderInputArea(styles.inputContainer)}
-        </View>
+          {renderInputArea(styles.bottomInputContainer)}
+        </KeyboardAvoidingView>
       ) : (
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
