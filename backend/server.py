@@ -216,6 +216,7 @@ class User(BaseModel):
     password_hash: Optional[str] = None
     google_id: Optional[str] = None
     is_phone_verified: bool = False
+    is_email_verified: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -249,6 +250,19 @@ class GoogleSigninRequest(BaseModel):
 class VerifyOTPRequest(BaseModel):
     phone: str
     otp: str
+
+
+class VerifyEmailCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+class ResendOTPRequest(BaseModel):
+    phone: str
+
+
+class ResendEmailCodeRequest(BaseModel):
+    email: str
 
 
 class UpdateProfileRequest(BaseModel):
@@ -310,6 +324,7 @@ def sanitize_user(user: dict) -> dict:
         "display_name": user.get("display_name"),
         "auth_provider": user["auth_provider"],
         "is_phone_verified": user.get("is_phone_verified", False),
+        "is_email_verified": user.get("is_email_verified", False),
         "created_at": user.get("created_at"),
     }
 
@@ -585,9 +600,7 @@ async def signup_with_phone(request: PhoneSignupRequest):
         "success": True,
         "token": token,
         "user": sanitize_user(user.model_dump()),
-        "generated_email": email,
         "otp_sent": True,
-        "message": f"Account created. Auto-generated email: {email}",
     }
 
 
@@ -610,12 +623,25 @@ async def signup_with_email(request: EmailSignupRequest):
     )
 
     await db.users.insert_one(user.model_dump())
+
+    # Generate email verification code
+    code = generate_otp()
+    await db.email_codes.insert_one({
+        "email": request.email.lower(),
+        "code": code,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+    })
+
+    logger.info(f"Email verification code for {request.email.lower()}: {code}")  # In production, send via email
+
     token = create_token(user.id)
 
     return {
         "success": True,
         "token": token,
         "user": sanitize_user(user.model_dump()),
+        "verification_sent": True,
     }
 
 
@@ -652,6 +678,7 @@ async def signup_with_google(request: GoogleSignupRequest):
             display_name=name or request.display_name,
             auth_provider="google",
             google_id=google_id,
+            is_email_verified=True,  # Google already verifies email
         )
 
         await db.users.insert_one(user.model_dump())
@@ -758,6 +785,86 @@ async def verify_otp(request: VerifyOTPRequest):
     await db.otps.delete_many({"phone": clean_phone})
 
     return {"success": True, "message": "Phone number verified"}
+
+
+@auth_router.post("/verify-email")
+async def verify_email(request: VerifyEmailCodeRequest):
+    """Verify email with 6-digit code"""
+    email = request.email.lower()
+
+    code_record = await db.email_codes.find_one({
+        "email": email,
+        "code": request.code,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
+
+    if not code_record:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+    # Mark email as verified
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"is_email_verified": True, "updated_at": datetime.now(timezone.utc)}}
+    )
+
+    # Clean up used codes
+    await db.email_codes.delete_many({"email": email})
+
+    return {"success": True, "message": "Email verified"}
+
+
+@auth_router.post("/resend-otp")
+async def resend_otp(request: ResendOTPRequest):
+    """Resend phone OTP"""
+    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+
+    user = await db.users.find_one({"phone": clean_phone})
+    if not user:
+        raise HTTPException(status_code=404, detail="Phone number not found")
+
+    if user.get("is_phone_verified"):
+        raise HTTPException(status_code=400, detail="Phone already verified")
+
+    # Delete old OTPs and create new one
+    await db.otps.delete_many({"phone": clean_phone})
+    otp = generate_otp()
+    await db.otps.insert_one({
+        "phone": clean_phone,
+        "otp": otp,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+    })
+
+    logger.info(f"Resent OTP for {clean_phone}: {otp}")  # In production, send via SMS
+
+    return {"success": True, "message": "OTP resent"}
+
+
+@auth_router.post("/resend-email-code")
+async def resend_email_code(request: ResendEmailCodeRequest):
+    """Resend email verification code"""
+    email = request.email.lower()
+
+    user = await db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    if user.get("is_email_verified"):
+        raise HTTPException(status_code=400, detail="Email already verified")
+
+    # Delete old codes and create new one
+    await db.email_codes.delete_many({"email": email})
+    code = generate_otp()
+    await db.email_codes.insert_one({
+        "email": email,
+        "code": code,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+    })
+
+    logger.info(f"Resent email code for {email}: {code}")  # In production, send via email
+
+    return {"success": True, "message": "Verification code resent"}
 
 
 @auth_router.get("/me")

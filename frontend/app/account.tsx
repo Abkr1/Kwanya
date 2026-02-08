@@ -400,19 +400,8 @@ export default function AccountScreen() {
         <View style={styles.infoSection}>
           <Text style={styles.sectionTitle}>Account Information</Text>
           <View style={styles.infoCard}>
-            {/* Email - only show for email/google signups */}
-            {user.auth_provider !== 'phone' && (
-              <View style={[styles.infoRow, styles.infoRowBorder]}>
-                <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Email</Text>
-                  <Text style={styles.infoValue}>{user.email}</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Phone */}
-            {user.phone && (
+            {/* Phone - only for phone users */}
+            {user.auth_provider === 'phone' && user.phone && (
               <View style={[styles.infoRow, styles.infoRowBorder]}>
                 <Ionicons name="call-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
                 <View style={styles.infoContent}>
@@ -428,6 +417,42 @@ export default function AccountScreen() {
                   <Text style={user.is_phone_verified ? styles.verifiedText : styles.unverifiedText}>
                     {user.is_phone_verified ? 'Verified' : 'Unverified'}
                   </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Email - only for email users */}
+            {user.auth_provider === 'email' && (
+              <View style={[styles.infoRow, styles.infoRowBorder]}>
+                <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue}>{user.email}</Text>
+                </View>
+                <View style={styles.verifiedBadge}>
+                  <Ionicons
+                    name={user.is_email_verified ? 'checkmark-circle' : 'alert-circle-outline'}
+                    size={14}
+                    color={user.is_email_verified ? palette.success : palette.textSubtle}
+                  />
+                  <Text style={user.is_email_verified ? styles.verifiedText : styles.unverifiedText}>
+                    {user.is_email_verified ? 'Verified' : 'Unverified'}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Email - for google users (always verified) */}
+            {user.auth_provider === 'google' && (
+              <View style={[styles.infoRow, styles.infoRowBorder]}>
+                <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoValue}>{user.email}</Text>
+                </View>
+                <View style={styles.verifiedBadge}>
+                  <Ionicons name="checkmark-circle" size={14} color={palette.success} />
+                  <Text style={styles.verifiedText}>Verified</Text>
                 </View>
               </View>
             )}
@@ -495,14 +520,26 @@ export default function AccountScreen() {
         <View style={styles.actionsSection}>
           <Text style={styles.sectionTitle}>Actions</Text>
 
-          {/* Verify phone if unverified */}
-          {user.phone && !user.is_phone_verified && (
+          {/* Verify phone - only for phone users */}
+          {user.auth_provider === 'phone' && !user.is_phone_verified && (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => router.push({ pathname: '/auth/verify-phone', params: { phone: user.phone! } })}
             >
               <Ionicons name="shield-checkmark-outline" size={20} color={palette.textSubtle} />
               <Text style={styles.actionButtonText}>Verify Phone Number</Text>
+              <Ionicons name="chevron-forward" size={18} color={palette.textSubtle} />
+            </TouchableOpacity>
+          )}
+
+          {/* Verify email - only for email users */}
+          {user.auth_provider === 'email' && !user.is_email_verified && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => router.push({ pathname: '/auth/verify-email', params: { email: user.email } })}
+            >
+              <Ionicons name="shield-checkmark-outline" size={20} color={palette.textSubtle} />
+              <Text style={styles.actionButtonText}>Verify Email Address</Text>
               <Ionicons name="chevron-forward" size={18} color={palette.textSubtle} />
             </TouchableOpacity>
           )}

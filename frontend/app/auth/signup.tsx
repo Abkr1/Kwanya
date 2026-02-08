@@ -135,7 +135,7 @@ export default function SignupScreen() {
     setIsLoading(false);
 
     if (result.success) {
-      router.replace('/');
+      router.replace({ pathname: '/auth/verify-email', params: { email: email.trim() } });
     } else {
       Alert.alert('Sign Up Failed', result.error || 'Please try again');
     }

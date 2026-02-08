@@ -16,17 +16,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
 
-const OTP_LENGTH = 6;
+const CODE_LENGTH = 6;
 
-export default function VerifyPhoneScreen() {
+export default function VerifyEmailScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { phone } = useLocalSearchParams<{ phone: string }>();
-  const { verifyOTP, resendOTP } = useAuth();
+  const { email } = useLocalSearchParams<{ email: string }>();
+  const { verifyEmail, resendEmailCode } = useAuth();
 
-  const [otp, setOtp] = useState<string[]>(new Array(OTP_LENGTH).fill(''));
+  const [code, setCode] = useState<string[]>(new Array(CODE_LENGTH).fill(''));
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const inputRefs = useRef<(TextInput | null)[]>([]);
@@ -44,53 +44,52 @@ export default function VerifyPhoneScreen() {
     disabled: isDark ? '#2f2f2f' : '#d9d9d9',
   }), [isDark]);
 
-  const handleOtpChange = (value: string, index: number) => {
+  const handleCodeChange = (value: string, index: number) => {
     if (value.length > 1) {
-      // Handle paste
-      const digits = value.replace(/\D/g, '').split('').slice(0, OTP_LENGTH);
-      const newOtp = [...otp];
+      const digits = value.replace(/\D/g, '').split('').slice(0, CODE_LENGTH);
+      const newCode = [...code];
       digits.forEach((d, i) => {
-        if (index + i < OTP_LENGTH) {
-          newOtp[index + i] = d;
+        if (index + i < CODE_LENGTH) {
+          newCode[index + i] = d;
         }
       });
-      setOtp(newOtp);
-      const nextIndex = Math.min(index + digits.length, OTP_LENGTH - 1);
+      setCode(newCode);
+      const nextIndex = Math.min(index + digits.length, CODE_LENGTH - 1);
       inputRefs.current[nextIndex]?.focus();
       return;
     }
 
-    const newOtp = [...otp];
-    newOtp[index] = value;
-    setOtp(newOtp);
+    const newCode = [...code];
+    newCode[index] = value;
+    setCode(newCode);
 
-    if (value && index < OTP_LENGTH - 1) {
+    if (value && index < CODE_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
   const handleKeyPress = (e: any, index: number) => {
-    if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
+    if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
-      const newOtp = [...otp];
-      newOtp[index - 1] = '';
-      setOtp(newOtp);
+      const newCode = [...code];
+      newCode[index - 1] = '';
+      setCode(newCode);
     }
   };
 
   const handleVerify = async () => {
-    const otpString = otp.join('');
-    if (otpString.length !== OTP_LENGTH) {
+    const codeString = code.join('');
+    if (codeString.length !== CODE_LENGTH) {
       Alert.alert('Error', 'Please enter the complete verification code');
       return;
     }
 
     setIsLoading(true);
-    const result = await verifyOTP(phone || '', otpString);
+    const result = await verifyEmail(email || '', codeString);
     setIsLoading(false);
 
     if (result.success) {
-      Alert.alert('Verified', 'Phone number verified successfully!', [
+      Alert.alert('Verified', 'Email verified successfully!', [
         { text: 'Continue', onPress: () => router.replace('/') },
       ]);
     } else {
@@ -100,11 +99,11 @@ export default function VerifyPhoneScreen() {
 
   const handleResend = async () => {
     setIsResending(true);
-    const result = await resendOTP(phone || '');
+    const result = await resendEmailCode(email || '');
     setIsResending(false);
 
     if (result.success) {
-      Alert.alert('Sent', 'A new verification code has been sent to your phone');
+      Alert.alert('Sent', 'A new verification code has been sent to your email');
     } else {
       Alert.alert('Error', result.error || 'Failed to resend code');
     }
@@ -162,19 +161,19 @@ export default function VerifyPhoneScreen() {
       lineHeight: 22,
       marginBottom: 8,
     },
-    phoneText: {
+    emailText: {
       fontSize: 16,
       fontWeight: '600',
       color: palette.text,
       marginBottom: 32,
     },
-    otpRow: {
+    codeRow: {
       flexDirection: 'row',
       justifyContent: 'center',
       gap: 10,
       marginBottom: 32,
     },
-    otpInput: {
+    codeInput: {
       width: 48,
       height: 56,
       borderRadius: 12,
@@ -186,7 +185,7 @@ export default function VerifyPhoneScreen() {
       fontWeight: '700',
       color: palette.text,
     },
-    otpInputFilled: {
+    codeInputFilled: {
       borderColor: palette.text,
     },
     verifyButton: {
@@ -233,7 +232,7 @@ export default function VerifyPhoneScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Verify Phone</Text>
+        <Text style={styles.headerTitle}>Verify Email</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -242,24 +241,24 @@ export default function VerifyPhoneScreen() {
       >
         <View style={styles.content}>
           <View style={styles.iconCircle}>
-            <Ionicons name="shield-checkmark-outline" size={36} color={palette.text} />
+            <Ionicons name="mail-open-outline" size={36} color={palette.text} />
           </View>
 
-          <Text style={styles.title}>Enter Code</Text>
+          <Text style={styles.title}>Check Your Email</Text>
           <Text style={styles.subtitle}>
             We sent a verification code to
           </Text>
-          <Text style={styles.phoneText}>{phone || 'your phone'}</Text>
+          <Text style={styles.emailText}>{email || 'your email'}</Text>
 
-          {/* OTP Inputs */}
-          <View style={styles.otpRow}>
-            {otp.map((digit, index) => (
+          {/* Code Inputs */}
+          <View style={styles.codeRow}>
+            {code.map((digit, index) => (
               <TextInput
                 key={index}
                 ref={(ref) => { inputRefs.current[index] = ref; }}
-                style={[styles.otpInput, digit && styles.otpInputFilled]}
+                style={[styles.codeInput, digit && styles.codeInputFilled]}
                 value={digit}
-                onChangeText={(value) => handleOtpChange(value, index)}
+                onChangeText={(value) => handleCodeChange(value, index)}
                 onKeyPress={(e) => handleKeyPress(e, index)}
                 keyboardType="number-pad"
                 maxLength={1}
