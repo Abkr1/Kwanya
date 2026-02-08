@@ -10,7 +10,6 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  useColorScheme,
   Keyboard,
   Modal,
   ScrollView,
@@ -26,10 +25,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from './_contexts/AuthContext';
+import { useTheme } from './_contexts/ThemeContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 const USER_ID_STORAGE_KEY = 'kwanya_user_id';
-const THEME_STORAGE_KEY = 'themePreference';
 
 interface Message {
   id: string;
@@ -57,26 +56,10 @@ interface AudioFileUpload {
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 export default function KwanyaApp() {
-  const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
-  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
-  const isDark = themePreference === 'system' ? colorScheme === 'dark' : themePreference === 'dark';
-
-  const palette = useMemo(() => ({
-    bg: isDark ? '#000000' : '#ffffff',
-    surface: isDark ? '#0d0d0d' : '#f7f7f7',
-    surfaceAlt: isDark ? '#151515' : '#f2f2f2',
-    text: isDark ? '#ffffff' : '#000000',
-    textMuted: isDark ? '#c7c7c7' : '#333333',
-    textSubtle: isDark ? '#9a9a9a' : '#666666',
-    border: isDark ? '#2a2a2a' : '#e5e5e5',
-    overlay: 'rgba(0,0,0,0.55)',
-    button: isDark ? '#ffffff' : '#000000',
-    buttonText: isDark ? '#000000' : '#ffffff',
-    disabled: isDark ? '#2f2f2f' : '#d9d9d9',
-  }), [isDark]);
+  const { isDark, palette, themePreference, setThemePreference } = useTheme();
 
   // State
   const [messages, setMessages] = useState<Message[]>([]);
@@ -98,12 +81,15 @@ export default function KwanyaApp() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const conversationRef = useRef<Conversation | null>(null);
+  const creatingConversationRef = useRef<Promise<Conversation | null> | null>(null);
   const sidebarWidth = Math.min(Dimensions.get('window').width * 0.8, 320);
   const sidebarTranslateX = useRef(new Animated.Value(-sidebarWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => { recordingRef.current = recording; }, [recording]);
+  useEffect(() => { conversationRef.current = currentConversation; }, [currentConversation]);
 
   // Use authenticated user ID when available, otherwise fall back to anonymous ID
   useEffect(() => {
@@ -156,20 +142,6 @@ export default function KwanyaApp() {
     };
   }, [userId]);
 
-  useEffect(() => {
-    const loadThemePreference = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(THEME_STORAGE_KEY);
-        if (stored === 'light' || stored === 'dark' || stored === 'system') {
-          setThemePreference(stored);
-        }
-      } catch (error) {
-        console.error('Failed to load theme preference:', error);
-      }
-    };
-
-    loadThemePreference();
-  }, []);
 
   useEffect(() => {
     if (sidebarVisible) {
@@ -225,14 +197,6 @@ export default function KwanyaApp() {
     Alert.alert('Copied', `${label} copied to clipboard.`);
   };
 
-  const applyThemePreference = async (value: 'light' | 'dark' | 'system') => {
-    setThemePreference(value);
-    try {
-      await AsyncStorage.setItem(THEME_STORAGE_KEY, value);
-    } catch (error) {
-      console.error('Failed to save theme preference:', error);
-    }
-  };
 
   const initializeApp = async () => {
     try {
@@ -259,6 +223,7 @@ export default function KwanyaApp() {
         language: 'ha',
       });
       setCurrentConversation(response.data);
+      conversationRef.current = response.data;
       return response.data;
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -267,8 +232,15 @@ export default function KwanyaApp() {
   };
 
   const ensureConversation = async (): Promise<Conversation | null> => {
-    if (currentConversation) return currentConversation;
-    return await createConversation();
+    // Use ref to avoid stale closure reads
+    if (conversationRef.current) return conversationRef.current;
+    // Mutex: if already creating, wait for that promise instead of creating a duplicate
+    if (creatingConversationRef.current) return creatingConversationRef.current;
+    const promise = createConversation();
+    creatingConversationRef.current = promise;
+    const result = await promise;
+    creatingConversationRef.current = null;
+    return result;
   };
 
   const loadConversationHistory = async () => {
@@ -286,6 +258,8 @@ export default function KwanyaApp() {
     setSidebarVisible(false);
     setMessages([]);
     setCurrentConversation(null);
+    conversationRef.current = null;
+    creatingConversationRef.current = null;
   };
 
   const loadConversation = async (conversation: Conversation) => {
@@ -362,7 +336,7 @@ export default function KwanyaApp() {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
 
-      if (uri && currentConversation) {
+      if (uri) {
         await transcribeAudio(uri);
       }
 
@@ -405,6 +379,7 @@ export default function KwanyaApp() {
 
       if (response.data.success) {
         const transcribedText = response.data.transcription;
+        const isFirstMessage = messages.length === 0;
 
         const userMessage: Message = {
           id: response.data.message_id,
@@ -413,6 +388,10 @@ export default function KwanyaApp() {
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, userMessage]);
+
+        if (isFirstMessage) {
+          await autoNameConversation(conversation.id, transcribedText);
+        }
 
         await getAIResponse(transcribedText, conversation);
       }
@@ -1084,7 +1063,7 @@ export default function KwanyaApp() {
                       styles.themeOptionButton,
                       themePreference === 'light' && styles.themeOptionButtonActive,
                     ]}
-                    onPress={() => applyThemePreference('light')}
+                    onPress={() => setThemePreference('light')}
                   >
                     <Text
                       style={[
@@ -1100,7 +1079,7 @@ export default function KwanyaApp() {
                       styles.themeOptionButton,
                       themePreference === 'dark' && styles.themeOptionButtonActive,
                     ]}
-                    onPress={() => applyThemePreference('dark')}
+                    onPress={() => setThemePreference('dark')}
                   >
                     <Text
                       style={[
@@ -1116,7 +1095,7 @@ export default function KwanyaApp() {
                       styles.themeOptionButton,
                       themePreference === 'system' && styles.themeOptionButtonActive,
                     ]}
-                    onPress={() => applyThemePreference('system')}
+                    onPress={() => setThemePreference('system')}
                   >
                     <Text
                       style={[

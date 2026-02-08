@@ -10,7 +10,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  useColorScheme,
   Modal,
   FlatList,
 } from 'react-native';
@@ -18,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
+import { useTheme } from '../_contexts/ThemeContext';
 
 type SignupMode = 'phone' | 'email';
 
@@ -57,8 +57,7 @@ const COUNTRY_CODES: CountryCode[] = [
 ];
 
 export default function SignupScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signUpWithPhone, signUpWithEmail, signUpWithGoogle } = useAuth();
@@ -81,22 +80,6 @@ export default function SignupScreen() {
       (c) => c.name.toLowerCase().includes(q) || c.dial.includes(q),
     );
   }, [countrySearch]);
-
-  const palette = useMemo(() => ({
-    bg: isDark ? '#000000' : '#ffffff',
-    surface: isDark ? '#0d0d0d' : '#f7f7f7',
-    surfaceAlt: isDark ? '#151515' : '#f2f2f2',
-    text: isDark ? '#ffffff' : '#000000',
-    textMuted: isDark ? '#c7c7c7' : '#333333',
-    textSubtle: isDark ? '#9a9a9a' : '#666666',
-    border: isDark ? '#2a2a2a' : '#e5e5e5',
-    button: isDark ? '#ffffff' : '#000000',
-    buttonText: isDark ? '#000000' : '#ffffff',
-    disabled: isDark ? '#2f2f2f' : '#d9d9d9',
-    overlay: 'rgba(0,0,0,0.55)',
-    error: '#e53935',
-    google: '#4285F4',
-  }), [isDark]);
 
   const handlePhoneSignup = async () => {
     if (!phone.trim()) {

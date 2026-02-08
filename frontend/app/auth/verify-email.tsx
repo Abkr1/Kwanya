@@ -9,18 +9,17 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
+import { useTheme } from '../_contexts/ThemeContext';
 
 const CODE_LENGTH = 6;
 
 export default function VerifyEmailScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
@@ -30,19 +29,6 @@ export default function VerifyEmailScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const inputRefs = useRef<(TextInput | null)[]>([]);
-
-  const palette = useMemo(() => ({
-    bg: isDark ? '#000000' : '#ffffff',
-    surface: isDark ? '#0d0d0d' : '#f7f7f7',
-    surfaceAlt: isDark ? '#151515' : '#f2f2f2',
-    text: isDark ? '#ffffff' : '#000000',
-    textMuted: isDark ? '#c7c7c7' : '#333333',
-    textSubtle: isDark ? '#9a9a9a' : '#666666',
-    border: isDark ? '#2a2a2a' : '#e5e5e5',
-    button: isDark ? '#ffffff' : '#000000',
-    buttonText: isDark ? '#000000' : '#ffffff',
-    disabled: isDark ? '#2f2f2f' : '#d9d9d9',
-  }), [isDark]);
 
   const handleCodeChange = (value: string, index: number) => {
     if (value.length > 1) {
