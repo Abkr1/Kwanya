@@ -13,6 +13,7 @@ export interface AuthUser {
   display_name?: string | null;
   auth_provider: string;
   is_phone_verified?: boolean;
+  is_email_verified?: boolean;
   created_at?: string;
 }
 
@@ -28,6 +29,9 @@ interface AuthContextType {
   signInWithGoogle: (googleToken: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   verifyOTP: (phone: string, otp: string) => Promise<{ success: boolean; error?: string }>;
+  verifyEmail: (email: string, code: string) => Promise<{ success: boolean; error?: string }>;
+  resendOTP: (phone: string) => Promise<{ success: boolean; error?: string }>;
+  resendEmailCode: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (displayName: string) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -210,6 +214,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
+  const verifyEmail = useCallback(async (email: string, code: string) => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/auth/verify-email`, {
+        email,
+        code,
+      });
+      if (response.data.success) {
+        if (user) {
+          const updatedUser = { ...user, is_email_verified: true };
+          setUser(updatedUser);
+          await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(updatedUser));
+        }
+        return { success: true };
+      }
+      return { success: false, error: 'Verification failed' };
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || 'Invalid code';
+      return { success: false, error: msg };
+    }
+  }, [user]);
+
+  const resendOTP = useCallback(async (phone: string) => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/auth/resend-otp`, { phone });
+      if (response.data.success) return { success: true };
+      return { success: false, error: 'Failed to resend' };
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || 'Failed to resend OTP';
+      return { success: false, error: msg };
+    }
+  }, []);
+
+  const resendEmailCode = useCallback(async (email: string) => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/auth/resend-email-code`, { email });
+      if (response.data.success) return { success: true };
+      return { success: false, error: 'Failed to resend' };
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || 'Failed to resend code';
+      return { success: false, error: msg };
+    }
+  }, []);
+
   const updateProfile = useCallback(async (displayName: string) => {
     try {
       const response = await axios.patch(
@@ -244,6 +291,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithGoogle,
         signOut,
         verifyOTP,
+        verifyEmail,
+        resendOTP,
+        resendEmailCode,
         updateProfile,
       }}
     >
