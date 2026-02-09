@@ -911,26 +911,12 @@ export default function KwanyaApp() {
     },
     loadingContainer: {
       flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
+      justifyContent: 'flex-end',
       paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingVertical: 6,
     },
     stopGeneratingButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      backgroundColor: palette.bg,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: palette.text,
-    },
-    stopGeneratingText: {
-      marginLeft: 4,
-      fontSize: 14,
-      color: palette.text,
-      fontWeight: '600',
+      padding: 6,
     },
   }), [palette, insets, keyboardVisible]);
 
@@ -1179,7 +1165,6 @@ export default function KwanyaApp() {
                 onPress={stopGenerating}
               >
                 <Ionicons name="stop-circle" size={24} color={palette.text} />
-                <Text style={styles.stopGeneratingText}>Stop</Text>
               </TouchableOpacity>
             </View>
           )}
