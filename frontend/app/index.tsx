@@ -802,31 +802,29 @@ export default function KwanyaApp() {
       paddingHorizontal: 16,
       paddingVertical: 10,
       borderRadius: 18,
-      borderWidth: 1,
-      borderColor: palette.border,
     },
     userMessage: {
       alignSelf: 'flex-end',
-      backgroundColor: palette.button,
+      backgroundColor: palette.userBubble,
       borderBottomRightRadius: 4,
     },
     userMessageDark: {
-      backgroundColor: palette.button,
+      backgroundColor: palette.userBubble,
     },
     assistantMessage: {
       alignSelf: 'flex-start',
-      backgroundColor: palette.surface,
+      backgroundColor: palette.assistantBubble,
       borderBottomLeftRadius: 4,
     },
     assistantMessageDark: {
-      backgroundColor: palette.surface,
+      backgroundColor: palette.assistantBubble,
     },
     messageText: {
       fontSize: 16,
       lineHeight: 22,
     },
     userMessageText: {
-      color: palette.buttonText,
+      color: palette.userBubbleText,
     },
     assistantMessageText: {
       color: palette.text,

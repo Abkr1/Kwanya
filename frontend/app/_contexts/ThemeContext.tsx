@@ -27,6 +27,11 @@ interface ThemeContextType {
     danger: string;
     dangerBg: string;
     success: string;
+    accent: string;
+    accentText: string;
+    userBubble: string;
+    userBubbleText: string;
+    assistantBubble: string;
   };
 }
 
@@ -62,22 +67,27 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const palette = useMemo(() => ({
-    bg: isDark ? '#000000' : '#ffffff',
-    surface: isDark ? '#0d0d0d' : '#f7f7f7',
-    surfaceAlt: isDark ? '#151515' : '#f2f2f2',
-    text: isDark ? '#ffffff' : '#000000',
-    textMuted: isDark ? '#c7c7c7' : '#333333',
-    textSubtle: isDark ? '#9a9a9a' : '#666666',
-    border: isDark ? '#2a2a2a' : '#e5e5e5',
+    bg: isDark ? '#1A1816' : '#F4F3EE',
+    surface: isDark ? '#242220' : '#EEEDE7',
+    surfaceAlt: isDark ? '#2E2B28' : '#E8E6DF',
+    text: isDark ? '#F4F3EE' : '#1A1816',
+    textMuted: isDark ? '#B8B3A8' : '#5D5A53',
+    textSubtle: isDark ? '#7D786F' : '#8C8880',
+    border: isDark ? '#3A3632' : '#D9D6CE',
     overlay: 'rgba(0,0,0,0.55)',
-    button: isDark ? '#ffffff' : '#000000',
-    buttonText: isDark ? '#000000' : '#ffffff',
-    disabled: isDark ? '#2f2f2f' : '#d9d9d9',
+    button: isDark ? '#D4764E' : '#C15F3C',
+    buttonText: '#FFFFFF',
+    disabled: isDark ? '#3A3632' : '#D4D1C9',
     error: '#e53935',
     google: '#4285F4',
     danger: '#e53935',
-    dangerBg: isDark ? '#2d1111' : '#fef2f2',
+    dangerBg: isDark ? '#2D1F1A' : '#fef2f2',
     success: '#43a047',
+    accent: isDark ? '#D4764E' : '#C15F3C',
+    accentText: '#FFFFFF',
+    userBubble: isDark ? '#D4764E' : '#C15F3C',
+    userBubbleText: '#FFFFFF',
+    assistantBubble: isDark ? '#2E2B28' : '#EEEDE7',
   }), [isDark]);
 
   return (
