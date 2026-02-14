@@ -170,13 +170,13 @@ export default function KwanyaApp() {
       Animated.parallel([
         Animated.timing(sidebarTranslateX, {
           toValue: -sidebarWidth,
-          duration: 180,
+          duration: 200,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(backdropOpacity, {
           toValue: 0,
-          duration: 150,
+          duration: 200,
           useNativeDriver: true,
         }),
       ]).start(() => setSidebarMounted(false));
@@ -929,6 +929,10 @@ export default function KwanyaApp() {
 
   return (
     <View style={styles.container}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={palette.bg}
+      />
       {/* Header with Menu Button */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -976,7 +980,7 @@ export default function KwanyaApp() {
                 style={styles.menuOption}
                 onPress={() => {
                   setSidebarVisible(false);
-                  router.push('/account');
+                  setTimeout(() => router.push('/account'), 220);
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
