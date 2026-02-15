@@ -16,7 +16,6 @@ import {
   Animated,
   Easing,
   BackHandler,
-  StatusBar,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Audio } from 'expo-av';
@@ -929,10 +928,6 @@ export default function KwanyaApp() {
 
   return (
     <View style={styles.container}>
-      <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={palette.bg}
-      />
       {/* Header with Menu Button */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -991,7 +986,7 @@ export default function KwanyaApp() {
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <View style={{
                       width: 8, height: 8, borderRadius: 4,
-                      backgroundColor: '#43a047', marginRight: 6,
+                      backgroundColor: palette.success, marginRight: 6,
                     }} />
                     <Text style={{ fontSize: 12, color: palette.textSubtle }}>
                       {user.display_name || user.email?.split('@')[0] || ''}
