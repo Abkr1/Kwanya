@@ -1097,7 +1097,7 @@ export default function KwanyaApp() {
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior="padding"
-          keyboardVerticalOffset={insets.top + 50}
+          keyboardVerticalOffset={insets.top}
         >
           <View style={styles.emptyStateBody}>
             <View style={styles.welcomeSection}>
@@ -1117,7 +1117,7 @@ export default function KwanyaApp() {
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior="padding"
-          keyboardVerticalOffset={insets.top + 50}
+          keyboardVerticalOffset={insets.top}
         >
           <FlatList
             ref={flatListRef}
