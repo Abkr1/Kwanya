@@ -16,7 +16,7 @@ import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
 
 export default function AccountScreen() {
-  const { isDark, palette } = useTheme();
+  const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated, signOut, updateProfile } = useAuth();
@@ -78,44 +78,6 @@ export default function AccountScreen() {
       default: return 'Unknown';
     }
   };
-
-  // If not authenticated, show sign-in prompt
-  if (!isAuthenticated || !user) {
-    return (
-      <View style={[styles_.container, { backgroundColor: palette.bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <View style={[styles_.header, { backgroundColor: palette.bg }]}>
-          <TouchableOpacity style={styles_.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={palette.text} />
-          </TouchableOpacity>
-          <Text style={[styles_.headerTitle, { color: palette.text }]}>Account</Text>
-        </View>
-
-        <View style={styles_.centeredContent}>
-          <View style={[styles_.iconCircle, { backgroundColor: palette.surfaceAlt, borderColor: palette.border }]}>
-            <Ionicons name="person-outline" size={48} color={palette.textSubtle} />
-          </View>
-          <Text style={[styles_.noAuthTitle, { color: palette.text }]}>No Account</Text>
-          <Text style={[styles_.noAuthSubtitle, { color: palette.textSubtle }]}>
-            Sign in or create an account to manage your profile
-          </Text>
-
-          <TouchableOpacity
-            style={[styles_.primaryButton, { backgroundColor: palette.button }]}
-            onPress={() => router.push('/auth/signup')}
-          >
-            <Text style={[styles_.primaryButtonText, { color: palette.buttonText }]}>Sign Up</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles_.secondaryButton, { borderColor: palette.border }]}
-            onPress={() => router.push('/auth/signin')}
-          >
-            <Text style={[styles_.secondaryButtonText, { color: palette.text }]}>Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
 
   const styles = useMemo(() => StyleSheet.create({
     container: {
@@ -348,7 +310,101 @@ export default function AccountScreen() {
       color: palette.danger,
       marginLeft: 8,
     },
+    centeredContent: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 32,
+    },
+    iconCircle: {
+      width: 96,
+      height: 96,
+      borderRadius: 48,
+      backgroundColor: palette.surfaceAlt,
+      borderColor: palette.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 20,
+      borderWidth: 1,
+    },
+    noAuthTitle: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: palette.text,
+      marginBottom: 8,
+    },
+    noAuthSubtitle: {
+      fontSize: 15,
+      color: palette.textSubtle,
+      textAlign: 'center',
+      lineHeight: 22,
+      marginBottom: 32,
+    },
+    primaryButton: {
+      width: '100%',
+      backgroundColor: palette.button,
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    primaryButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: palette.buttonText,
+    },
+    secondaryButton: {
+      width: '100%',
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: palette.border,
+    },
+    secondaryButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: palette.text,
+    },
   }), [palette, insets]);
+
+  // If not authenticated, show sign-in prompt
+  if (!isAuthenticated || !user) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color={palette.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Account</Text>
+        </View>
+
+        <View style={styles.centeredContent}>
+          <View style={styles.iconCircle}>
+            <Ionicons name="person-outline" size={48} color={palette.textSubtle} />
+          </View>
+          <Text style={styles.noAuthTitle}>No Account</Text>
+          <Text style={styles.noAuthSubtitle}>
+            Sign in or create an account to manage your profile
+          </Text>
+
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => router.push('/auth/signup')}
+          >
+            <Text style={styles.primaryButtonText}>Sign Up</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => router.push('/auth/signin')}
+          >
+            <Text style={styles.secondaryButtonText}>Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   const initials = (user.display_name || user.email || '?')
     .split(' ')
@@ -537,72 +593,3 @@ export default function AccountScreen() {
     </View>
   );
 }
-
-// Static styles for unauthenticated state
-const styles_ = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginLeft: 12,
-  },
-  centeredContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  iconCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    borderWidth: 1,
-  },
-  noAuthTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  noAuthSubtitle: {
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 32,
-  },
-  primaryButton: {
-    width: '100%',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    width: '100%',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});

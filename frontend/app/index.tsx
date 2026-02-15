@@ -59,7 +59,7 @@ export default function KwanyaApp() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
-  const { isDark, palette, themePreference, setThemePreference } = useTheme();
+  const { palette, themePreference, setThemePreference } = useTheme();
 
   // State
   const [messages, setMessages] = useState<Message[]>([]);
@@ -510,21 +510,19 @@ export default function KwanyaApp() {
         style={[
           styles.messageContainer,
           isUser ? styles.userMessage : styles.assistantMessage,
-          isDark && (isUser ? styles.userMessageDark : styles.assistantMessageDark),
         ]}
       >
         <Text
           style={[
             styles.messageText,
             isUser ? styles.userMessageText : styles.assistantMessageText,
-            isDark && styles.messageTextDark,
           ]}
         >
           {item.content}
         </Text>
       </TouchableOpacity>
     );
-  }, [isDark, palette]);
+  }, [palette]);
 
   // Extracted InputArea to avoid duplication
   const renderInputArea = (containerStyle: object) => (
@@ -605,9 +603,6 @@ export default function KwanyaApp() {
       fontWeight: '700',
       color: palette.text,
     },
-    headerTitleDark: {
-      color: palette.text,
-    },
     headerRight: {
       width: 36,
     },
@@ -636,9 +631,6 @@ export default function KwanyaApp() {
       zIndex: 101,
       elevation: 101,
     },
-    sidebarDark: {
-      backgroundColor: palette.bg,
-    },
     sidebarHeader: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -651,9 +643,6 @@ export default function KwanyaApp() {
     sidebarTitle: {
       fontSize: 20,
       fontWeight: '700',
-      color: palette.text,
-    },
-    sidebarTitleDark: {
       color: palette.text,
     },
     newChatButton: {
@@ -687,9 +676,6 @@ export default function KwanyaApp() {
     menuOptionText: {
       marginLeft: 12,
       fontSize: 16,
-      color: palette.textMuted,
-    },
-    menuOptionTextDark: {
       color: palette.textMuted,
     },
     menuOptionSpacer: {
@@ -748,9 +734,6 @@ export default function KwanyaApp() {
       marginBottom: 12,
       paddingHorizontal: 4,
     },
-    chatHistoryTitleDark: {
-      color: palette.textSubtle,
-    },
     chatHistoryList: {
       flex: 1,
     },
@@ -762,9 +745,6 @@ export default function KwanyaApp() {
       borderRadius: 8,
       marginBottom: 4,
     },
-    chatHistoryItemDark: {
-      backgroundColor: 'transparent',
-    },
     chatHistoryItemActive: {
       backgroundColor: palette.surfaceAlt,
     },
@@ -773,9 +753,6 @@ export default function KwanyaApp() {
       fontSize: 15,
       color: palette.textMuted,
       flex: 1,
-    },
-    chatHistoryItemTextDark: {
-      color: palette.textMuted,
     },
     chatHistoryItemTextActive: {
       color: palette.text,
@@ -786,9 +763,6 @@ export default function KwanyaApp() {
       color: palette.textSubtle,
       textAlign: 'center',
       paddingVertical: 20,
-    },
-    noChatTextDark: {
-      color: palette.textSubtle,
     },
     messagesList: {
       flexGrow: 1,
@@ -807,16 +781,10 @@ export default function KwanyaApp() {
       backgroundColor: palette.userBubble,
       borderBottomRightRadius: 4,
     },
-    userMessageDark: {
-      backgroundColor: palette.userBubble,
-    },
     assistantMessage: {
       alignSelf: 'flex-start',
       backgroundColor: palette.assistantBubble,
       borderBottomLeftRadius: 4,
-    },
-    assistantMessageDark: {
-      backgroundColor: palette.assistantBubble,
     },
     messageText: {
       fontSize: 16,
@@ -828,7 +796,6 @@ export default function KwanyaApp() {
     assistantMessageText: {
       color: palette.text,
     },
-    messageTextDark: {},
     emptyStateBody: {
       flex: 1,
       justifyContent: 'center',
@@ -864,7 +831,7 @@ export default function KwanyaApp() {
       width: 12,
       height: 12,
       borderRadius: 6,
-      backgroundColor: palette.text,
+      backgroundColor: palette.danger,
       marginRight: 8,
     },
     recordingText: {
@@ -900,8 +867,7 @@ export default function KwanyaApp() {
       justifyContent: 'center',
     },
     iconButtonRecording: {
-      borderWidth: 1,
-      borderColor: palette.text,
+      backgroundColor: palette.danger,
     },
     iconButtonDisabled: {
       backgroundColor: palette.disabled,
@@ -936,7 +902,7 @@ export default function KwanyaApp() {
         >
           <Ionicons name="menu" size={28} color={palette.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, isDark && styles.headerTitleDark]}>Kwanya</Text>
+        <Text style={styles.headerTitle}>Kwanya</Text>
         <View style={styles.headerRight} />
       </View>
 
@@ -951,13 +917,12 @@ export default function KwanyaApp() {
           <Animated.View
             style={[
               styles.sidebar,
-              isDark && styles.sidebarDark,
               { transform: [{ translateX: sidebarTranslateX }] },
             ]}
           >
             {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
-              <Text style={[styles.sidebarTitle, isDark && styles.sidebarTitleDark]}>Menu</Text>
+              <Text style={styles.sidebarTitle}>Menu</Text>
               <TouchableOpacity onPress={() => setSidebarVisible(false)}>
                 <Ionicons name="close" size={28} color={palette.text} />
               </TouchableOpacity>
@@ -982,7 +947,7 @@ export default function KwanyaApp() {
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
-                <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Account</Text>
+                <Text style={styles.menuOptionText}>Account</Text>
                 <View style={styles.menuOptionSpacer} />
                 {isAuthenticated && user ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1005,7 +970,7 @@ export default function KwanyaApp() {
                 }}
               >
                 <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
-                <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Credits</Text>
+                <Text style={styles.menuOptionText}>Credits</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </TouchableOpacity>
@@ -1014,7 +979,7 @@ export default function KwanyaApp() {
                 onPress={() => setThemeExpanded((prev) => !prev)}
               >
                 <Ionicons name="contrast-outline" size={22} color={palette.textMuted} />
-                <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Theme</Text>
+                <Text style={styles.menuOptionText}>Theme</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons
                   name={themeExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1024,7 +989,7 @@ export default function KwanyaApp() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.menuOption}>
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
-                <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Settings</Text>
+                <Text style={styles.menuOptionText}>Settings</Text>
               </TouchableOpacity>
             </View>
 
@@ -1086,12 +1051,12 @@ export default function KwanyaApp() {
 
             {/* Chat History */}
             <View style={styles.chatHistorySection}>
-              <Text style={[styles.chatHistoryTitle, isDark && styles.chatHistoryTitleDark]}>
+              <Text style={styles.chatHistoryTitle}>
                 Chat History
               </Text>
               <ScrollView style={styles.chatHistoryList} showsVerticalScrollIndicator={false}>
                 {conversationHistory.length === 0 ? (
-                  <Text style={[styles.noChatText, isDark && styles.noChatTextDark]}>
+                  <Text style={styles.noChatText}>
                     No previous chats
                   </Text>
                 ) : (
@@ -1101,7 +1066,6 @@ export default function KwanyaApp() {
                       style={[
                         styles.chatHistoryItem,
                         currentConversation?.id === conv.id && styles.chatHistoryItemActive,
-                        isDark && styles.chatHistoryItemDark,
                       ]}
                       onPress={() => loadConversation(conv)}
                     >
@@ -1114,7 +1078,6 @@ export default function KwanyaApp() {
                         style={[
                           styles.chatHistoryItemText,
                           currentConversation?.id === conv.id && styles.chatHistoryItemTextActive,
-                          isDark && styles.chatHistoryItemTextDark,
                         ]}
                         numberOfLines={1}
                       >

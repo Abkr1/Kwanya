@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   ActivityIndicator,
   Alert,
@@ -57,7 +56,7 @@ const COUNTRY_CODES: CountryCode[] = [
 ];
 
 export default function SignupScreen() {
-  const { isDark, palette } = useTheme();
+  const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signUpWithPhone, signUpWithEmail, signUpWithGoogle } = useAuth();
@@ -436,7 +435,7 @@ export default function SignupScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
       >
         <ScrollView
           style={styles.scrollContent}
@@ -588,7 +587,7 @@ export default function SignupScreen() {
           {/* Google */}
           <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignup}>
             <View style={styles.googleIcon}>
-              <Ionicons name="logo-google" size={12} color="#ffffff" />
+              <Ionicons name="logo-google" size={12} color={palette.accentText} />
             </View>
             <Text style={styles.socialButtonText}>Continue with Google</Text>
           </TouchableOpacity>

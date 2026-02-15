@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -19,7 +18,7 @@ import { useTheme } from '../_contexts/ThemeContext';
 const OTP_LENGTH = 6;
 
 export default function VerifyPhoneScreen() {
-  const { isDark, palette } = useTheme();
+  const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone: string }>();
@@ -224,7 +223,7 @@ export default function VerifyPhoneScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
       >
         <View style={styles.content}>
           <View style={styles.iconCircle}>

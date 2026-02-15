@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -19,7 +18,7 @@ import { useTheme } from '../_contexts/ThemeContext';
 const CODE_LENGTH = 6;
 
 export default function VerifyEmailScreen() {
-  const { isDark, palette } = useTheme();
+  const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
@@ -223,7 +222,7 @@ export default function VerifyEmailScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
       >
         <View style={styles.content}>
           <View style={styles.iconCircle}>
