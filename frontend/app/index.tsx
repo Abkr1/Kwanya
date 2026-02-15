@@ -947,21 +947,9 @@ export default function KwanyaApp() {
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>Account</Text>
+                <Text style={styles.menuOptionText}>Profile</Text>
                 <View style={styles.menuOptionSpacer} />
-                {isAuthenticated && user ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{
-                      width: 8, height: 8, borderRadius: 4,
-                      backgroundColor: palette.success, marginRight: 6,
-                    }} />
-                    <Text style={{ fontSize: 12, color: palette.textSubtle }}>
-                      {user.display_name || user.email?.split('@')[0] || ''}
-                    </Text>
-                  </View>
-                ) : (
-                  <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-                )}
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.menuOption}
