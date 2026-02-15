@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   FlatList,
   StyleSheet,
   KeyboardAvoidingView,
@@ -53,7 +54,7 @@ interface AudioFileUpload {
 }
 
 // Move outside component to avoid recreation on every render
-const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function KwanyaApp() {
   const insets = useSafeAreaInsets();
@@ -909,10 +910,9 @@ export default function KwanyaApp() {
 
       {/* Sidebar Overlay */}
       {sidebarMounted && (
-        <View style={styles.sidebarOverlay}>
-          <AnimatedTouchableOpacity
+        <View style={styles.sidebarOverlay} pointerEvents="box-none">
+          <AnimatedPressable
             style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]}
-            activeOpacity={1}
             onPress={() => setSidebarVisible(false)}
           />
           <Animated.View
@@ -924,35 +924,33 @@ export default function KwanyaApp() {
             {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
               <Text style={styles.sidebarTitle}>Menu</Text>
-              <TouchableOpacity onPress={() => setSidebarVisible(false)}>
+              <Pressable hitSlop={8} onPress={() => setSidebarVisible(false)}>
                 <Ionicons name="close" size={28} color={palette.text} />
-              </TouchableOpacity>
+              </Pressable>
             </View>
 
             {/* New Chat Button */}
-            <TouchableOpacity style={styles.newChatButton} onPress={startNewChat}>
+            <Pressable style={styles.newChatButton} onPress={startNewChat}>
               <Ionicons name="add-circle-outline" size={24} color={palette.text} />
               <Text style={styles.newChatText}>New Chat</Text>
-            </TouchableOpacity>
+            </Pressable>
 
             {/* Menu Options */}
             <View style={styles.menuOptions}>
-              <TouchableOpacity
+              <Pressable
                 style={styles.menuOption}
                 onPress={() => {
+                  setSidebarVisible(false);
+                  setSidebarMounted(false);
                   router.push('/account');
-                  requestAnimationFrame(() => {
-                    setSidebarVisible(false);
-                    setSidebarMounted(false);
-                  });
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>Profile</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
+              </Pressable>
+              <Pressable
                 style={styles.menuOption}
                 onPress={() => {
                   // TODO: navigate to credits/top-up screen when payment is integrated
@@ -962,8 +960,8 @@ export default function KwanyaApp() {
                 <Text style={styles.menuOptionText}>Credits</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
+              </Pressable>
+              <Pressable
                 style={styles.menuOption}
                 onPress={() => setThemeExpanded((prev) => !prev)}
               >
@@ -975,18 +973,18 @@ export default function KwanyaApp() {
                   size={18}
                   color={palette.textMuted}
                 />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.menuOption}>
+              </Pressable>
+              <Pressable style={styles.menuOption}>
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>Settings</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
 
             {themeExpanded && (
               <View style={styles.themeSection}>
                 <Text style={styles.themeTitle}>Theme</Text>
                 <View style={styles.themeOptionsRow}>
-                  <TouchableOpacity
+                  <Pressable
                     style={[
                       styles.themeOptionButton,
                       themePreference === 'light' && styles.themeOptionButtonActive,
@@ -1001,8 +999,8 @@ export default function KwanyaApp() {
                     >
                       Light Mode
                     </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  </Pressable>
+                  <Pressable
                     style={[
                       styles.themeOptionButton,
                       themePreference === 'dark' && styles.themeOptionButtonActive,
@@ -1017,8 +1015,8 @@ export default function KwanyaApp() {
                     >
                       Dark Mode
                     </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  </Pressable>
+                  <Pressable
                     style={[
                       styles.themeOptionButton,
                       themePreference === 'system' && styles.themeOptionButtonActive,
@@ -1033,7 +1031,7 @@ export default function KwanyaApp() {
                     >
                       System
                     </Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
               </View>
             )}
@@ -1050,7 +1048,7 @@ export default function KwanyaApp() {
                   </Text>
                 ) : (
                   conversationHistory.map((conv) => (
-                    <TouchableOpacity
+                    <Pressable
                       key={conv.id}
                       style={[
                         styles.chatHistoryItem,
@@ -1072,7 +1070,7 @@ export default function KwanyaApp() {
                       >
                         {conv.title || 'New Conversation'}
                       </Text>
-                    </TouchableOpacity>
+                    </Pressable>
                   ))
                 )}
               </ScrollView>
