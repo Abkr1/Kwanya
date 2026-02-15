@@ -1003,6 +1003,17 @@ export default function KwanyaApp() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.menuOption}
+                onPress={() => {
+                  // TODO: navigate to credits/top-up screen when payment is integrated
+                }}
+              >
+                <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
+                <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Credits</Text>
+                <View style={styles.menuOptionSpacer} />
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuOption}
                 onPress={() => setThemeExpanded((prev) => !prev)}
               >
                 <Ionicons name="contrast-outline" size={22} color={palette.textMuted} />
