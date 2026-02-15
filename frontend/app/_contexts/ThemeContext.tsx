@@ -88,8 +88,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     assistantBubble: isDark ? '#2E2B28' : '#EEEDE7',
   }), [isDark]);
 
+  const value = useMemo(() => ({
+    themePreference, isDark, setThemePreference, palette,
+  }), [themePreference, isDark, setThemePreference, palette]);
+
   return (
-    <ThemeContext.Provider value={{ themePreference, isDark, setThemePreference, palette }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

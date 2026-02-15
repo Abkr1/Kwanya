@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
@@ -277,26 +277,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [token, user]);
 
+  const value = useMemo(() => ({
+    user,
+    token,
+    isLoading,
+    isAuthenticated,
+    signUpWithPhone,
+    signUpWithEmail,
+    signUpWithGoogle,
+    signIn,
+    signInWithGoogle,
+    signOut,
+    verifyOTP,
+    verifyEmail,
+    resendOTP,
+    resendEmailCode,
+    updateProfile,
+  }), [user, token, isLoading, isAuthenticated, signUpWithPhone, signUpWithEmail,
+    signUpWithGoogle, signIn, signInWithGoogle, signOut, verifyOTP, verifyEmail,
+    resendOTP, resendEmailCode, updateProfile]);
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        isLoading,
-        isAuthenticated,
-        signUpWithPhone,
-        signUpWithEmail,
-        signUpWithGoogle,
-        signIn,
-        signInWithGoogle,
-        signOut,
-        verifyOTP,
-        verifyEmail,
-        resendOTP,
-        resendEmailCode,
-        updateProfile,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

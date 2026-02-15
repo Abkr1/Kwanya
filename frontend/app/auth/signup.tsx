@@ -59,7 +59,7 @@ export default function SignupScreen() {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signUpWithPhone, signUpWithEmail, signUpWithGoogle } = useAuth();
+  const { signUpWithPhone, signUpWithEmail } = useAuth();
 
   const [mode, setMode] = useState<SignupMode>('phone');
   const [phone, setPhone] = useState('');
@@ -152,6 +152,8 @@ export default function SignupScreen() {
       alignItems: 'center',
       paddingHorizontal: 16,
       paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.border,
     },
     backButton: {
       padding: 4,

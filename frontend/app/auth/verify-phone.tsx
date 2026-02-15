@@ -107,6 +107,8 @@ export default function VerifyPhoneScreen() {
       alignItems: 'center',
       paddingHorizontal: 16,
       paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.border,
     },
     backButton: {
       padding: 4,

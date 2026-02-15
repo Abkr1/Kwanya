@@ -20,7 +20,7 @@ export default function SigninScreen() {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn } = useAuth();
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -67,6 +67,8 @@ export default function SigninScreen() {
       alignItems: 'center',
       paddingHorizontal: 16,
       paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.border,
     },
     backButton: {
       padding: 4,
