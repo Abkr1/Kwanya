@@ -1136,7 +1136,8 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
+          keyboardVerticalOffset={insets.top + 50}
         >
           <View style={styles.emptyStateBody}>
             <View style={styles.welcomeSection}>
@@ -1155,8 +1156,8 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          behavior="padding"
+          keyboardVerticalOffset={insets.top + 50}
         >
           <FlatList
             ref={flatListRef}
