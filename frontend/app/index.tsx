@@ -170,13 +170,13 @@ export default function KwanyaApp() {
       Animated.parallel([
         Animated.timing(sidebarTranslateX, {
           toValue: -sidebarWidth,
-          duration: 180,
+          duration: 200,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(backdropOpacity, {
           toValue: 0,
-          duration: 150,
+          duration: 200,
           useNativeDriver: true,
         }),
       ]).start(() => setSidebarMounted(false));
@@ -929,6 +929,10 @@ export default function KwanyaApp() {
 
   return (
     <View style={styles.container}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={palette.bg}
+      />
       {/* Header with Menu Button */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -976,6 +980,7 @@ export default function KwanyaApp() {
                 style={styles.menuOption}
                 onPress={() => {
                   setSidebarVisible(false);
+                  setSidebarMounted(false);
                   router.push('/account');
                 }}
               >
@@ -995,6 +1000,17 @@ export default function KwanyaApp() {
                 ) : (
                   <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
                 )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuOption}
+                onPress={() => {
+                  // TODO: navigate to credits/top-up screen when payment is integrated
+                }}
+              >
+                <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
+                <Text style={[styles.menuOptionText, isDark && styles.menuOptionTextDark]}>Credits</Text>
+                <View style={styles.menuOptionSpacer} />
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.menuOption}
@@ -1120,7 +1136,8 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
+          keyboardVerticalOffset={insets.top + 50}
         >
           <View style={styles.emptyStateBody}>
             <View style={styles.welcomeSection}>
@@ -1139,8 +1156,8 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          behavior="padding"
+          keyboardVerticalOffset={insets.top + 50}
         >
           <FlatList
             ref={flatListRef}
