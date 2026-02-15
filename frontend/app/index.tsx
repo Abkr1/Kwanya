@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   Pressable,
   FlatList,
   StyleSheet,
@@ -13,8 +12,8 @@ import {
   Alert,
   Keyboard,
   ScrollView,
-  Dimensions,
   Animated,
+  useWindowDimensions,
   Easing,
   BackHandler,
 } from 'react-native';
@@ -58,6 +57,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function KwanyaApp() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const router = useRouter();
   const params = useLocalSearchParams<{ sidebar?: string }>();
   const { user, isAuthenticated } = useAuth();
@@ -85,7 +85,7 @@ export default function KwanyaApp() {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const conversationRef = useRef<Conversation | null>(null);
   const creatingConversationRef = useRef<Promise<Conversation | null> | null>(null);
-  const sidebarWidth = Math.min(Dimensions.get('window').width * 0.8, 320);
+  const sidebarWidth = Math.min(windowWidth * 0.8, 320);
   const sidebarTranslateX = useRef(new Animated.Value(-sidebarWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -288,7 +288,7 @@ export default function KwanyaApp() {
       const response = await axios.get(`${BACKEND_URL}/api/conversations/${conversation.id}/messages`);
       if (response.data.success) {
         setMessages(response.data.messages);
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 200);
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
@@ -511,12 +511,11 @@ export default function KwanyaApp() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const renderMessage = useCallback(({ item }: { item: Message }) => {
+  const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
 
     return (
-      <TouchableOpacity
-        activeOpacity={0.85}
+      <Pressable
         onLongPress={() => copyToClipboard(item.content, 'Message')}
         style={[
           styles.messageContainer,
@@ -531,9 +530,9 @@ export default function KwanyaApp() {
         >
           {item.content}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
     );
-  }, [palette]);
+  };
 
   // Extracted InputArea to avoid duplication
   const renderInputArea = (containerStyle: object) => (
@@ -557,7 +556,7 @@ export default function KwanyaApp() {
           editable={!isLoading && !isRecording}
         />
 
-        <TouchableOpacity
+        <Pressable
           style={[
             styles.iconButton,
             isRecording && styles.iconButtonRecording,
@@ -571,10 +570,10 @@ export default function KwanyaApp() {
             size={24}
             color={palette.buttonText}
           />
-        </TouchableOpacity>
+        </Pressable>
 
         {inputText.trim().length > 0 && (
-          <TouchableOpacity
+          <Pressable
             style={[
               styles.iconButton,
               isLoading && styles.iconButtonDisabled,
@@ -583,7 +582,7 @@ export default function KwanyaApp() {
             disabled={isLoading || isRecording}
           >
             <Ionicons name="send" size={20} color={palette.buttonText} />
-          </TouchableOpacity>
+          </Pressable>
         )}
       </View>
     </View>
@@ -632,7 +631,7 @@ export default function KwanyaApp() {
       left: 0,
       top: 0,
       bottom: 0,
-      width: Dimensions.get('window').width * 0.8,
+      width: windowWidth * 0.8,
       maxWidth: 320,
       backgroundColor: palette.bg,
       paddingTop: insets.top + 10,
@@ -907,12 +906,13 @@ export default function KwanyaApp() {
     <View style={styles.container}>
       {/* Header with Menu Button */}
       <View style={styles.header}>
-        <TouchableOpacity
+        <Pressable
           style={styles.menuButton}
+          hitSlop={8}
           onPress={() => setSidebarVisible(true)}
         >
           <Ionicons name="menu" size={28} color={palette.text} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.headerTitle}>Kwanya</Text>
         <View style={styles.headerRight} />
       </View>
@@ -959,16 +959,11 @@ export default function KwanyaApp() {
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
-              <Pressable
-                style={styles.menuOption}
-                onPress={() => {
-                  // TODO: navigate to credits/top-up screen when payment is integrated
-                }}
-              >
+              <Pressable style={[styles.menuOption, { opacity: 0.4 }]} disabled>
                 <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>Credits</Text>
                 <View style={styles.menuOptionSpacer} />
-                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                <Text style={{ fontSize: 11, color: palette.textSubtle }}>Coming soon</Text>
               </Pressable>
               <Pressable
                 style={styles.menuOption}
@@ -983,9 +978,11 @@ export default function KwanyaApp() {
                   color={palette.textMuted}
                 />
               </Pressable>
-              <Pressable style={styles.menuOption}>
+              <Pressable style={[styles.menuOption, { opacity: 0.4 }]} disabled>
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>Settings</Text>
+                <View style={styles.menuOptionSpacer} />
+                <Text style={{ fontSize: 11, color: palette.textSubtle }}>Coming soon</Text>
               </Pressable>
             </View>
 
@@ -1095,7 +1092,7 @@ export default function KwanyaApp() {
           behavior="padding"
           keyboardVerticalOffset={insets.top}
         >
-          <View style={styles.emptyStateBody}>
+          <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
             <View style={styles.welcomeSection}>
               <Ionicons
                 name="chatbubbles-outline"
@@ -1104,7 +1101,7 @@ export default function KwanyaApp() {
               />
               <Text style={styles.emptyText}>Barka da zuwa!</Text>
             </View>
-          </View>
+          </Pressable>
 
           {renderInputArea(styles.bottomInputContainer)}
         </KeyboardAvoidingView>
@@ -1131,12 +1128,12 @@ export default function KwanyaApp() {
           {/* Stop Button */}
           {isLoading && (
             <View style={styles.loadingContainer}>
-              <TouchableOpacity
+              <Pressable
                 style={styles.stopGeneratingButton}
                 onPress={stopGenerating}
               >
                 <Ionicons name="stop-circle" size={24} color={palette.text} />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           )}
 

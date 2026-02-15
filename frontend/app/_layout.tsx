@@ -38,10 +38,7 @@ function RootNavigator() {
         >
           <Stack.Screen name="index" />
           <Stack.Screen name="account" />
-          <Stack.Screen name="auth/signin" />
-          <Stack.Screen name="auth/signup" />
-          <Stack.Screen name="auth/verify-phone" />
-          <Stack.Screen name="auth/verify-email" />
+          <Stack.Screen name="auth" />
         </Stack>
       </NavThemeProvider>
     </View>
