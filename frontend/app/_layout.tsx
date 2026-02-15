@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { View, StatusBar } from 'react-native';
 import { Stack } from 'expo-router';
 import { ThemeProvider as NavThemeProvider, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { AuthProvider } from './_contexts/AuthContext';
@@ -20,22 +21,30 @@ function RootNavigator() {
   }), [isDark, palette]);
 
   return (
-    <NavThemeProvider value={navTheme}>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: palette.bg },
-          animation: 'none',
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="account" />
-        <Stack.Screen name="auth/signin" />
-        <Stack.Screen name="auth/signup" />
-        <Stack.Screen name="auth/verify-phone" />
-        <Stack.Screen name="auth/verify-email" />
-      </Stack>
-    </NavThemeProvider>
+    <View style={{ flex: 1, backgroundColor: palette.bg }}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={palette.bg}
+        translucent={false}
+      />
+      <NavThemeProvider value={navTheme}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: palette.bg },
+            animation: 'none',
+            freezeOnBlur: true,
+          }}
+        >
+          <Stack.Screen name="index" />
+          <Stack.Screen name="account" />
+          <Stack.Screen name="auth/signin" />
+          <Stack.Screen name="auth/signup" />
+          <Stack.Screen name="auth/verify-phone" />
+          <Stack.Screen name="auth/verify-email" />
+        </Stack>
+      </NavThemeProvider>
+    </View>
   );
 }
 

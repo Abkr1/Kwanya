@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   ActivityIndicator,
   Alert,
@@ -18,7 +17,7 @@ import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
 
 export default function SigninScreen() {
-  const { isDark, palette } = useTheme();
+  const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signIn, signInWithGoogle } = useAuth();
@@ -223,7 +222,7 @@ export default function SigninScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
       >
         <ScrollView
           style={styles.scrollContent}
@@ -298,7 +297,7 @@ export default function SigninScreen() {
           {/* Google */}
           <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignin}>
             <View style={styles.googleIcon}>
-              <Ionicons name="logo-google" size={12} color="#ffffff" />
+              <Ionicons name="logo-google" size={12} color={palette.accentText} />
             </View>
             <Text style={styles.socialButtonText}>Continue with Google</Text>
           </TouchableOpacity>

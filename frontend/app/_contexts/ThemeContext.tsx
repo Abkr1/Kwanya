@@ -22,7 +22,6 @@ interface ThemeContextType {
     button: string;
     buttonText: string;
     disabled: string;
-    error: string;
     google: string;
     danger: string;
     dangerBg: string;
@@ -78,7 +77,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     button: isDark ? '#D4764E' : '#C15F3C',
     buttonText: '#FFFFFF',
     disabled: isDark ? '#3A3632' : '#D4D1C9',
-    error: '#e53935',
     google: '#4285F4',
     danger: '#e53935',
     dangerBg: isDark ? '#2D1F1A' : '#fef2f2',
