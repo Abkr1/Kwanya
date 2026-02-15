@@ -974,9 +974,11 @@ export default function KwanyaApp() {
               <TouchableOpacity
                 style={styles.menuOption}
                 onPress={() => {
-                  setSidebarVisible(false);
-                  setSidebarMounted(false);
                   router.push('/account');
+                  requestAnimationFrame(() => {
+                    setSidebarVisible(false);
+                    setSidebarMounted(false);
+                  });
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
