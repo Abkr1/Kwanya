@@ -278,6 +278,7 @@ export default function KwanyaApp() {
       const response = await axios.get(`${BACKEND_URL}/api/conversations/${conversation.id}/messages`);
       if (response.data.success) {
         setMessages(response.data.messages);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
