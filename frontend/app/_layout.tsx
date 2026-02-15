@@ -25,7 +25,7 @@ function RootNavigator() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: palette.bg },
-          animation: 'fade',
+          animation: 'none',
         }}
       >
         <Stack.Screen name="index" />

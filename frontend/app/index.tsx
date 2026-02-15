@@ -980,7 +980,8 @@ export default function KwanyaApp() {
                 style={styles.menuOption}
                 onPress={() => {
                   setSidebarVisible(false);
-                  setTimeout(() => router.push('/account'), 220);
+                  setSidebarMounted(false);
+                  router.push('/account');
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
