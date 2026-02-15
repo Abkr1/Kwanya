@@ -373,7 +373,7 @@ export default function AccountScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.replace({ pathname: '/', params: { sidebar: '1' } })}>
             <Ionicons name="arrow-back" size={24} color={palette.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Account</Text>
@@ -416,7 +416,7 @@ export default function AccountScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.replace({ pathname: '/', params: { sidebar: '1' } })}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Account</Text>

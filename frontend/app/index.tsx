@@ -24,7 +24,7 @@ import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
 
@@ -59,6 +59,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 export default function KwanyaApp() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ sidebar?: string }>();
   const { user, isAuthenticated } = useAuth();
   const { palette, themePreference, setThemePreference } = useTheme();
 
@@ -198,6 +199,14 @@ export default function KwanyaApp() {
     });
     return () => handler.remove();
   }, [sidebarVisible]);
+
+  // Reopen sidebar when navigating back from account
+  useEffect(() => {
+    if (params.sidebar === '1') {
+      setSidebarVisible(true);
+      router.setParams({ sidebar: undefined });
+    }
+  }, [params.sidebar]);
 
   const copyToClipboard = async (text: string, label: string) => {
     if (!text.trim()) {
