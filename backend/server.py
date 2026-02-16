@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
@@ -173,6 +173,21 @@ class RateLimiter:
         return True
 
 rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
+auth_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
+
+
+async def check_rate_limit(request: Request):
+    """Rate limit dependency for general API endpoints"""
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+
+
+async def check_auth_rate_limit(request: Request):
+    """Stricter rate limit for auth endpoints (10 req/min)"""
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
 
 
 # ==================== AUTHENTICATION ====================
@@ -197,7 +212,7 @@ app = FastAPI(
 )
 
 # Create a router with the /api prefix and API key auth
-api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
+api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key), Depends(check_rate_limit)])
 
 
 # ==================== MODELS ====================
@@ -370,17 +385,19 @@ async def transcribe_audio(
     conversation_id: str = File(...)
 ):
     """Transcribe Hausa audio using Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)"""
+    temp_path = None
+    wav_path = None
     try:
         logger.info(f"Received audio file: {audio.filename}, size: {audio.size}")
-        
+
         # Save uploaded file temporarily
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
         temp_path = temp_file.name
-        
+
         async with aiofiles.open(temp_path, 'wb') as f:
             content = await audio.read()
             await f.write(content)
-        
+
         # Convert M4A to WAV (16kHz mono) — uses ffmpeg if available, otherwise torchaudio
         wav_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         wav_path = wav_temp.name
@@ -388,7 +405,7 @@ async def transcribe_audio(
 
         convert_audio_to_wav(temp_path, wav_path)
         logger.info(f"Audio converted to WAV successfully (using {'ffmpeg' if HAS_FFMPEG else 'torchaudio'})")
-        
+
         # Transcribe using Hausa ASR in thread pool (90s timeout to avoid Cloudflare 520)
         loop = asyncio.get_running_loop()
         try:
@@ -402,13 +419,6 @@ async def transcribe_audio(
             )
         except asyncio.TimeoutError:
             raise Exception("Transcription timed out. The ASR model may still be loading — please try again.")
-        
-        # Clean up temp files
-        try:
-            os.unlink(temp_path)
-            os.unlink(wav_path)
-        except OSError:
-            pass
         
         # Save message to database
         message = Message(
@@ -436,6 +446,14 @@ async def transcribe_audio(
     except Exception as e:
         logger.error(f"Transcription error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        # Always clean up temp files
+        for path in (temp_path, wav_path):
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 # ==================== CHAT ENDPOINT ====================
@@ -573,17 +591,26 @@ async def get_messages(conversation_id: str):
 
 
 @api_router.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
-    """Delete a conversation and its messages"""
+async def delete_conversation(conversation_id: str, user_id: str = ""):
+    """Delete a conversation and its messages (requires matching user_id)"""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    conversation = await db.conversations.find_one({"id": conversation_id})
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this conversation")
+
     await db.conversations.delete_one({"id": conversation_id})
     await db.messages.delete_many({"conversation_id": conversation_id})
-    
+
     return {"success": True, "message": "Conversation deleted"}
 
 
 # ==================== AUTH ENDPOINTS ====================
 
-auth_router = APIRouter(prefix="/api/auth")
+auth_router = APIRouter(prefix="/api/auth", dependencies=[Depends(check_auth_rate_limit)])
 
 
 @auth_router.post("/signup/phone")
@@ -624,7 +651,7 @@ async def signup_with_phone(request: PhoneSignupRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
     })
 
-    logger.info(f"OTP for {clean_phone}: {otp}")  # In production, send via SMS
+    logger.info(f"OTP generated for {clean_phone[-4:]}")  # TODO: send via SMS
 
     token = create_token(user.id)
 
@@ -665,7 +692,7 @@ async def signup_with_email(request: EmailSignupRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
 
-    logger.info(f"Email verification code for {request.email.lower()}: {code}")  # In production, send via email
+    logger.info(f"Email verification code generated for {request.email.lower()}")  # TODO: send via email
 
     token = create_token(user.id)
 
@@ -867,7 +894,7 @@ async def resend_otp(request: ResendOTPRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
     })
 
-    logger.info(f"Resent OTP for {clean_phone}: {otp}")  # In production, send via SMS
+    logger.info(f"OTP resent for {clean_phone[-4:]}")  # TODO: send via SMS
 
     return {"success": True, "message": "OTP resent"}
 
@@ -894,7 +921,7 @@ async def resend_email_code(request: ResendEmailCodeRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
 
-    logger.info(f"Resent email code for {email}: {code}")  # In production, send via email
+    logger.info(f"Email verification code resent for {email}")  # TODO: send via email
 
     return {"success": True, "message": "Verification code resent"}
 

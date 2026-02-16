@@ -292,6 +292,7 @@ export default function KwanyaApp() {
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
+      Alert.alert('Error', 'Failed to load conversation messages');
     }
   };
 
@@ -351,6 +352,7 @@ export default function KwanyaApp() {
       setIsRecording(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
 
       await recording.stopAndUnloadAsync();
@@ -365,6 +367,14 @@ export default function KwanyaApp() {
 
     } catch (error) {
       console.error('Failed to stop recording:', error);
+      // Ensure cleanup even on error
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setIsRecording(false);
+      setRecording(null);
+      setRecordingTime(0);
       Alert.alert('Error', 'Failed to stop recording');
     }
   };
@@ -432,7 +442,7 @@ export default function KwanyaApp() {
   };
 
   const sendTextMessage = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isLoading) return;
 
     const conversation = await ensureConversation();
     if (!conversation) return;
