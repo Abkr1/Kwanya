@@ -394,6 +394,7 @@ export default function KwanyaApp() {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
+          timeout: 120000,
         }
       );
 
@@ -419,7 +420,12 @@ export default function KwanyaApp() {
     } catch (error) {
       const axiosErr = error as AxiosError<{ detail?: string }>;
       console.error('Transcription error:', error);
-      Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to transcribe audio');
+      const status = axiosErr.response?.status;
+      let msg = axiosErr.response?.data?.detail || 'Failed to transcribe audio';
+      if (status === 520 || status === 522 || status === 524) {
+        msg = 'Server is taking too long to respond. The speech model may still be loading — please try again in a moment.';
+      }
+      Alert.alert('Error', msg);
     } finally {
       setIsLoading(false);
     }
