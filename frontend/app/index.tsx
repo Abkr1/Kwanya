@@ -929,7 +929,6 @@ export default function KwanyaApp() {
         >
           <Ionicons name="menu" size={28} color={palette.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Kwanya</Text>
         <View style={styles.headerRight} />
       </View>
 
