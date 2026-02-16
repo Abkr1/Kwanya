@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
@@ -173,6 +173,21 @@ class RateLimiter:
         return True
 
 rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
+auth_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
+
+
+async def check_rate_limit(request: Request):
+    """Rate limit dependency for general API endpoints"""
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+
+
+async def check_auth_rate_limit(request: Request):
+    """Stricter rate limit for auth endpoints (10 req/min)"""
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
 
 
 # ==================== AUTHENTICATION ====================
@@ -197,7 +212,7 @@ app = FastAPI(
 )
 
 # Create a router with the /api prefix and API key auth
-api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
+api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key), Depends(check_rate_limit)])
 
 
 # ==================== MODELS ====================
@@ -595,7 +610,7 @@ async def delete_conversation(conversation_id: str, user_id: str = ""):
 
 # ==================== AUTH ENDPOINTS ====================
 
-auth_router = APIRouter(prefix="/api/auth")
+auth_router = APIRouter(prefix="/api/auth", dependencies=[Depends(check_auth_rate_limit)])
 
 
 @auth_router.post("/signup/phone")
