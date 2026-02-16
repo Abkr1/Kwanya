@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import subprocess
+import shutil
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -81,22 +82,46 @@ def get_hausa_asr():
         hausa_asr_pipe = load_hausa_asr()
     return hausa_asr_pipe
 
+HAS_FFMPEG = shutil.which("ffmpeg") is not None
+
+
+def convert_audio_to_wav(input_path: str, output_path: str) -> None:
+    """Convert audio file to 16kHz mono WAV. Uses ffmpeg if available, otherwise torchaudio."""
+    if HAS_FFMPEG:
+        result = subprocess.run([
+            'ffmpeg', '-y', '-i', input_path,
+            '-ar', '16000', '-ac', '1', '-f', 'wav', output_path
+        ], capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise Exception(f"FFmpeg conversion failed: {result.stderr}")
+    else:
+        # Fallback: use torchaudio to load and convert
+        waveform, sample_rate = torchaudio.load(input_path)
+        # Convert to mono if stereo
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        # Resample to 16kHz
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+            waveform = resampler(waveform)
+        torchaudio.save(output_path, waveform, 16000)
+
+
 def transcribe_hausa_audio_sync(audio_path: str) -> str:
     """Synchronous Hausa audio transcription"""
     pipe = get_hausa_asr()
-    
+
     # Load and resample audio to 16kHz if needed
     audio, sample_rate = sf.read(audio_path)
-    
+
     if sample_rate != 16000:
-        # Resample to 16kHz
         audio_tensor = torch.tensor(audio).float()
         if len(audio_tensor.shape) == 1:
             audio_tensor = audio_tensor.unsqueeze(0)
         resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
         audio_resampled = resampler(audio_tensor)
         audio = audio_resampled.squeeze().numpy()
-    
+
     # Transcribe
     result = pipe(audio, generate_kwargs={"language": "ha", "task": "transcribe"})
     return result["text"]
@@ -106,6 +131,9 @@ def transcribe_hausa_audio_sync(audio_path: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle"""
+    # Log audio conversion backend
+    logger.info(f"Audio conversion: {'ffmpeg' if HAS_FFMPEG else 'torchaudio (ffmpeg not found)'}")
+
     # Preload Hausa ASR model in background thread so first request isn't slow
     loop = asyncio.get_running_loop()
     loop.run_in_executor(asr_executor, load_hausa_asr)
@@ -353,30 +381,13 @@ async def transcribe_audio(
             content = await audio.read()
             await f.write(content)
         
-        # Convert M4A to WAV using ffmpeg (16kHz mono)
+        # Convert M4A to WAV (16kHz mono) — uses ffmpeg if available, otherwise torchaudio
         wav_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
         wav_path = wav_temp.name
         wav_temp.close()
-        
-        try:
-            # Use ffmpeg to convert M4A to 16kHz mono WAV
-            result = subprocess.run([
-                'ffmpeg', '-y', '-i', temp_path,
-                '-ar', '16000',  # Sample rate 16kHz
-                '-ac', '1',      # Mono
-                '-f', 'wav',     # Output format
-                wav_path
-            ], capture_output=True, text=True, timeout=30)
-            
-            if result.returncode != 0:
-                logger.error(f"FFmpeg error: {result.stderr}")
-                raise Exception(f"Audio conversion failed: {result.stderr}")
-                
-            logger.info("Audio converted to WAV successfully")
-        except subprocess.TimeoutExpired:
-            raise Exception("Audio conversion timed out")
-        except FileNotFoundError:
-            raise Exception("FFmpeg not found. Please install ffmpeg.")
+
+        convert_audio_to_wav(temp_path, wav_path)
+        logger.info(f"Audio converted to WAV successfully (using {'ffmpeg' if HAS_FFMPEG else 'torchaudio'})")
         
         # Transcribe using Hausa ASR in thread pool (90s timeout to avoid Cloudflare 520)
         loop = asyncio.get_running_loop()
@@ -945,6 +956,7 @@ async def health_check():
             "mongodb": mongo_status,
             "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
             "gemini": "configured" if os.environ.get('EMERGENT_LLM_KEY') else "not configured",
+            "audio_converter": "ffmpeg" if HAS_FFMPEG else "torchaudio",
         },
         "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
     }
