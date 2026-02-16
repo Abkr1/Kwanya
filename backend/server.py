@@ -106,6 +106,10 @@ def transcribe_hausa_audio_sync(audio_path: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle"""
+    # Preload Hausa ASR model in background thread so first request isn't slow
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(asr_executor, load_hausa_asr)
+
     yield
 
     # Shutdown
@@ -374,13 +378,19 @@ async def transcribe_audio(
         except FileNotFoundError:
             raise Exception("FFmpeg not found. Please install ffmpeg.")
         
-        # Transcribe using Hausa ASR in thread pool
+        # Transcribe using Hausa ASR in thread pool (90s timeout to avoid Cloudflare 520)
         loop = asyncio.get_running_loop()
-        transcribed_text = await loop.run_in_executor(
-            asr_executor,
-            transcribe_hausa_audio_sync,
-            wav_path
-        )
+        try:
+            transcribed_text = await asyncio.wait_for(
+                loop.run_in_executor(
+                    asr_executor,
+                    transcribe_hausa_audio_sync,
+                    wav_path
+                ),
+                timeout=90
+            )
+        except asyncio.TimeoutError:
+            raise Exception("Transcription timed out. The ASR model may still be loading — please try again.")
         
         # Clean up temp files
         try:
@@ -947,7 +957,7 @@ app.include_router(auth_router)
 # CORS - restrict to known origins (allow all in development via env var)
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
 if not allowed_origins or allowed_origins == [""]:
-    allowed_origins = ["http://localhost:8081", "http://localhost:19006"]
+    allowed_origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
