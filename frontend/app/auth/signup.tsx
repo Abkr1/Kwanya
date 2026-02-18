@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,17 @@ import {
   Alert,
   Modal,
   FlatList,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 type SignupMode = 'phone' | 'email';
 
@@ -59,7 +64,13 @@ export default function SignupScreen() {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signUpWithPhone, signUpWithEmail } = useAuth();
+  const { signUpWithPhone, signUpWithEmail, signUpWithGoogle } = useAuth();
+
+  const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID,
+  });
 
   const [mode, setMode] = useState<SignupMode>('phone');
   const [phone, setPhone] = useState('');
@@ -123,13 +134,33 @@ export default function SignupScreen() {
     }
   };
 
+  useEffect(() => {
+    if (googleResponse?.type === 'success') {
+      const idToken = googleResponse.authentication?.idToken;
+      if (idToken) {
+        (async () => {
+          setIsLoading(true);
+          const result = await signUpWithGoogle(idToken, displayName.trim() || undefined);
+          setIsLoading(false);
+          if (result.success) {
+            router.replace('/');
+          } else {
+            Alert.alert('Google Sign-Up Failed', result.error || 'Please try again');
+          }
+        })();
+      }
+    }
+  }, [googleResponse]);
+
   const handleGoogleSignup = async () => {
-    // Google sign-in requires expo-auth-session or @react-native-google-signin
-    // For now, show configuration message
-    Alert.alert(
-      'Google Sign-Up',
-      'Google sign-in requires additional configuration. Please set up a Google OAuth client ID in your environment.',
-    );
+    if (!googleRequest) {
+      Alert.alert(
+        'Google Sign-Up',
+        'Google sign-in is not configured. Please set up Google OAuth client IDs in your environment.',
+      );
+      return;
+    }
+    await googlePromptAsync();
   };
 
   const handleSignup = () => {

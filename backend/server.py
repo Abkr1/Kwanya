@@ -55,6 +55,14 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-productio
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 30  # 30 days
 
+# Termii SMS Configuration
+TERMII_API_KEY = os.environ.get("TERMII_API_KEY", "")
+TERMII_SENDER_ID = os.environ.get("TERMII_SENDER_ID", "Kwanya")
+
+# Resend Email Configuration
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "verify@yourdomain.com")
+
 # Monnify Configuration
 MONNIFY_API_KEY = os.environ.get("MONNIFY_API_KEY", "")
 MONNIFY_SECRET_KEY = os.environ.get("MONNIFY_SECRET_KEY", "")
@@ -383,6 +391,67 @@ def generate_otp() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
 
+async def send_sms_otp(phone: str, otp: str) -> bool:
+    """Send OTP via Termii SMS API. Returns True on success."""
+    if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
+        logger.warning(f"Termii not configured — OTP for {phone[-4:]}: {otp}")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.post(
+                "https://api.ng.termii.com/api/sms/send",
+                json={
+                    "to": phone,
+                    "from": TERMII_SENDER_ID,
+                    "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
+                    "type": "plain",
+                    "channel": "generic",
+                    "api_key": TERMII_API_KEY,
+                },
+            )
+            resp.raise_for_status()
+            logger.info(f"SMS OTP sent to {phone[-4:]}")
+            return True
+    except Exception as e:
+        logger.error(f"Termii SMS failed for {phone[-4:]}: {e}")
+        return False
+
+
+async def send_verification_email(email: str, code: str) -> bool:
+    """Send verification code via Resend email API. Returns True on success."""
+    if not RESEND_API_KEY or RESEND_API_KEY.startswith("<"):
+        logger.warning(f"Resend not configured — code for {email}: {code}")
+        return False
+    try:
+        html_body = f"""
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+            <h2 style="color:#1a1a1a;margin-bottom:8px">Verify your email</h2>
+            <p style="color:#555;font-size:15px">Enter this code in the Kwanya app to verify your email address:</p>
+            <div style="background:#f4f4f5;border-radius:8px;padding:20px;text-align:center;margin:24px 0">
+                <span style="font-size:32px;font-weight:700;letter-spacing:6px;color:#1a1a1a">{code}</span>
+            </div>
+            <p style="color:#888;font-size:13px">This code expires in 10 minutes. If you didn't request this, ignore this email.</p>
+        </div>
+        """
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                json={
+                    "from": f"Kwanya <{RESEND_FROM_EMAIL}>",
+                    "to": [email],
+                    "subject": f"Your Kwanya verification code: {code}",
+                    "html": html_body,
+                },
+            )
+            resp.raise_for_status()
+            logger.info(f"Verification email sent to {email}")
+            return True
+    except Exception as e:
+        logger.error(f"Resend email failed for {email}: {e}")
+        return False
+
+
 def sanitize_user(user: dict) -> dict:
     """Return safe user data (no password hash)"""
     return {
@@ -673,7 +742,9 @@ async def signup_with_phone(request: PhoneSignupRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
     })
 
-    logger.info(f"OTP generated for {clean_phone[-4:]}")  # TODO: send via SMS
+    # Send OTP via SMS
+    sms_sent = await send_sms_otp(clean_phone, otp)
+    logger.info(f"OTP generated for {clean_phone[-4:]} (sent={sms_sent})")
 
     token = create_token(user.id)
 
@@ -681,7 +752,7 @@ async def signup_with_phone(request: PhoneSignupRequest):
         "success": True,
         "token": token,
         "user": sanitize_user(user.model_dump()),
-        "otp_sent": True,
+        "otp_sent": sms_sent,
     }
 
 
@@ -714,7 +785,9 @@ async def signup_with_email(request: EmailSignupRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
 
-    logger.info(f"Email verification code generated for {request.email.lower()}")  # TODO: send via email
+    # Send verification code via email
+    email_sent = await send_verification_email(request.email.lower(), code)
+    logger.info(f"Email verification code generated for {request.email.lower()} (sent={email_sent})")
 
     token = create_token(user.id)
 
@@ -722,7 +795,7 @@ async def signup_with_email(request: EmailSignupRequest):
         "success": True,
         "token": token,
         "user": sanitize_user(user.model_dump()),
-        "verification_sent": True,
+        "verification_sent": email_sent,
     }
 
 
@@ -916,9 +989,11 @@ async def resend_otp(request: ResendOTPRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
     })
 
-    logger.info(f"OTP resent for {clean_phone[-4:]}")  # TODO: send via SMS
+    # Send OTP via SMS
+    sms_sent = await send_sms_otp(clean_phone, otp)
+    logger.info(f"OTP resent for {clean_phone[-4:]} (sent={sms_sent})")
 
-    return {"success": True, "message": "OTP resent"}
+    return {"success": True, "message": "OTP resent", "otp_sent": sms_sent}
 
 
 @auth_router.post("/resend-email-code")
@@ -943,9 +1018,11 @@ async def resend_email_code(request: ResendEmailCodeRequest):
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
 
-    logger.info(f"Email verification code resent for {email}")  # TODO: send via email
+    # Send verification code via email
+    email_sent = await send_verification_email(email, code)
+    logger.info(f"Email verification code resent for {email} (sent={email_sent})")
 
-    return {"success": True, "message": "Verification code resent"}
+    return {"success": True, "message": "Verification code resent", "verification_sent": email_sent}
 
 
 @auth_router.get("/me")
