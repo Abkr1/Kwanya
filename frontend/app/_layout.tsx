@@ -38,6 +38,7 @@ function RootNavigator() {
         >
           <Stack.Screen name="index" />
           <Stack.Screen name="account" />
+          <Stack.Screen name="credits" />
           <Stack.Screen name="auth" />
         </Stack>
       </NavThemeProvider>

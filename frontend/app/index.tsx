@@ -974,11 +974,18 @@ export default function KwanyaApp() {
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
-              <Pressable style={[styles.menuOption, { opacity: 0.4 }]} disabled>
+              <Pressable
+                style={styles.menuOption}
+                onPress={() => {
+                  setSidebarVisible(false);
+                  setSidebarMounted(false);
+                  router.push('/credits');
+                }}
+              >
                 <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>Credits</Text>
                 <View style={styles.menuOptionSpacer} />
-                <Text style={{ fontSize: 11, color: palette.textSubtle }}>Coming soon</Text>
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
               <Pressable
                 style={styles.menuOption}

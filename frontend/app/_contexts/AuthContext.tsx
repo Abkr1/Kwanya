@@ -15,6 +15,7 @@ export interface AuthUser {
   is_phone_verified?: boolean;
   is_email_verified?: boolean;
   created_at?: string;
+  credit_balance?: number;
 }
 
 interface AuthContextType {

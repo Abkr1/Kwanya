@@ -22,8 +22,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import bcrypt
 from jose import jwt as jose_jwt, JWTError
+import json
 import re
 import secrets
+import httpx
+import hashlib
+import hmac
+import base64
 
 # Hausa ASR (NCAIR1/Hausa-ASR) - Fine-tuned Whisper for Hausa
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
@@ -49,6 +54,15 @@ asr_executor = ThreadPoolExecutor(max_workers=2)
 JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 30  # 30 days
+
+# Monnify Configuration
+MONNIFY_API_KEY = os.environ.get("MONNIFY_API_KEY", "")
+MONNIFY_SECRET_KEY = os.environ.get("MONNIFY_SECRET_KEY", "")
+MONNIFY_CONTRACT_CODE = os.environ.get("MONNIFY_CONTRACT_CODE", "")
+MONNIFY_BASE_URL = os.environ.get("MONNIFY_BASE_URL", "https://sandbox.monnify.com")
+
+# Monnify token cache
+_monnify_token_cache: dict = {"token": None, "expires_at": 0.0}
 
 # ==================== HAUSA ASR MODEL (Abkrs1/Hausa-ASR-copy) ====================
 # Fine-tuned Whisper model specifically for Hausa language
@@ -252,6 +266,13 @@ class ConversationCreate(BaseModel):
     language: str = "ha"
 
 
+# ==================== CREDITS & PAYMENT MODELS ====================
+
+class InitPaymentRequest(BaseModel):
+    amount: float
+    credits: int
+
+
 # ==================== USER & AUTH MODELS ====================
 
 class User(BaseModel):
@@ -373,6 +394,7 @@ def sanitize_user(user: dict) -> dict:
         "is_phone_verified": user.get("is_phone_verified", False),
         "is_email_verified": user.get("is_email_verified", False),
         "created_at": user.get("created_at"),
+        "credit_balance": user.get("credit_balance", 0),
     }
 
 
@@ -962,6 +984,234 @@ async def update_profile(
 async def signout():
     """Sign out (client-side token removal)"""
     return {"success": True, "message": "Signed out successfully"}
+
+
+# ==================== MONNIFY HELPERS ====================
+
+async def get_monnify_token() -> str:
+    """Get Monnify access token, caching for 4 minutes"""
+    now = time.time()
+    if _monnify_token_cache["token"] and _monnify_token_cache["expires_at"] > now:
+        return _monnify_token_cache["token"]
+
+    credentials = base64.b64encode(f"{MONNIFY_API_KEY}:{MONNIFY_SECRET_KEY}".encode()).decode()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{MONNIFY_BASE_URL}/api/v1/auth/login",
+            headers={"Authorization": f"Basic {credentials}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    token = data["responseBody"]["accessToken"]
+    _monnify_token_cache["token"] = token
+    _monnify_token_cache["expires_at"] = now + 240  # 4 minutes
+    return token
+
+
+# ==================== CREDITS ENDPOINTS ====================
+
+@api_router.get("/credits/balance")
+async def get_credit_balance(
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Get authenticated user's credit balance"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"success": True, "credit_balance": user.get("credit_balance", 0)}
+
+
+@api_router.post("/credits/initialize")
+async def initialize_payment(
+    request: InitPaymentRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Initialize a Monnify payment transaction"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if request.amount < 100:
+        raise HTTPException(status_code=400, detail="Minimum amount is N100")
+
+    if not MONNIFY_API_KEY or not MONNIFY_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Payment gateway not configured")
+
+    payment_reference = f"KWANYA-{uuid.uuid4().hex[:12].upper()}"
+
+    # Save transaction record
+    transaction = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "amount": request.amount,
+        "credits": request.credits,
+        "payment_reference": payment_reference,
+        "transaction_reference": None,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc),
+        "completed_at": None,
+    }
+    await db.transactions.insert_one(transaction)
+
+    # Initialize with Monnify
+    try:
+        token = await get_monnify_token()
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.post(
+                f"{MONNIFY_BASE_URL}/api/v1/merchant/transactions/init-transaction",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "amount": request.amount,
+                    "customerName": user.get("display_name") or user["email"],
+                    "customerEmail": user["email"],
+                    "paymentReference": payment_reference,
+                    "paymentDescription": f"Purchase {request.credits} Kwanya credits",
+                    "currencyCode": "NGN",
+                    "contractCode": MONNIFY_CONTRACT_CODE,
+                    "redirectUrl": "https://kwanya.app/payment/complete",
+                },
+            )
+            resp.raise_for_status()
+            monnify_data = resp.json()
+
+        checkout_url = monnify_data["responseBody"]["checkoutUrl"]
+        tx_ref = monnify_data["responseBody"].get("transactionReference")
+
+        # Update transaction with Monnify reference
+        await db.transactions.update_one(
+            {"payment_reference": payment_reference},
+            {"$set": {"transaction_reference": tx_ref}},
+        )
+
+        return {
+            "success": True,
+            "checkout_url": checkout_url,
+            "payment_reference": payment_reference,
+            "transaction_reference": tx_ref,
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Monnify init error: {e.response.text}")
+        await db.transactions.update_one(
+            {"payment_reference": payment_reference},
+            {"$set": {"status": "failed"}},
+        )
+        raise HTTPException(status_code=502, detail="Payment initialization failed")
+    except Exception as e:
+        logger.error(f"Monnify init error: {str(e)}")
+        raise HTTPException(status_code=502, detail="Payment initialization failed")
+
+
+@api_router.get("/credits/verify/{payment_reference}")
+async def verify_payment(
+    payment_reference: str,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Poll-based payment verification fallback"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    transaction = await db.transactions.find_one(
+        {"payment_reference": payment_reference}, {"_id": 0}
+    )
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    if transaction["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if transaction["status"] == "completed":
+        return {"success": True, "status": "completed", "credits": transaction["credits"]}
+
+    # Verify with Monnify API
+    try:
+        token = await get_monnify_token()
+        from urllib.parse import quote
+        raw_ref = transaction.get("transaction_reference") or payment_reference
+        encoded_ref = quote(raw_ref, safe="")
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(
+                f"{MONNIFY_BASE_URL}/api/v2/transactions/{encoded_ref}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            monnify_data = resp.json()
+
+        body = monnify_data.get("responseBody", {})
+        payment_status = body.get("paymentStatus", "")
+
+        if payment_status == "PAID" and body.get("amountPaid", 0) >= transaction["amount"]:
+            # Atomically credit user (idempotent via pending filter)
+            result = await db.transactions.update_one(
+                {"payment_reference": payment_reference, "status": "pending"},
+                {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc)}},
+            )
+            if result.modified_count > 0:
+                await db.users.update_one(
+                    {"id": user["id"]},
+                    {"$inc": {"credit_balance": transaction["credits"]}},
+                )
+            return {"success": True, "status": "completed", "credits": transaction["credits"]}
+
+        return {"success": True, "status": "pending"}
+
+    except Exception as e:
+        logger.error(f"Monnify verify error: {str(e)}")
+        return {"success": True, "status": "pending"}
+
+
+# ==================== MONNIFY WEBHOOK (no API key auth) ====================
+
+@app.post("/api/webhooks/monnify")
+async def monnify_webhook(request: Request):
+    """Handle Monnify payment webhook notifications"""
+    body = await request.body()
+
+    # Verify Monnify signature
+    if MONNIFY_SECRET_KEY:
+        signature = request.headers.get("monnify-signature", "")
+        computed = hmac.new(
+            MONNIFY_SECRET_KEY.encode(), body, hashlib.sha512
+        ).hexdigest()
+        if not hmac.compare_digest(computed, signature):
+            logger.warning("Monnify webhook signature mismatch")
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    payload = json.loads(body)
+
+    event_data = payload.get("eventData", {})
+    payment_reference = event_data.get("paymentReference", "")
+    payment_status = event_data.get("paymentStatus", "")
+    amount_paid = event_data.get("amountPaid", 0)
+
+    if not payment_reference:
+        return {"status": "ignored"}
+
+    transaction = await db.transactions.find_one({"payment_reference": payment_reference})
+    if not transaction:
+        logger.warning(f"Webhook for unknown payment reference: {payment_reference}")
+        return {"status": "ignored"}
+
+    if payment_status == "PAID" and amount_paid >= transaction["amount"]:
+        # Atomically mark as completed (idempotent)
+        result = await db.transactions.update_one(
+            {"payment_reference": payment_reference, "status": "pending"},
+            {"$set": {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc),
+                "transaction_reference": event_data.get("transactionReference"),
+            }},
+        )
+        if result.modified_count > 0:
+            await db.users.update_one(
+                {"id": transaction["user_id"]},
+                {"$inc": {"credit_balance": transaction["credits"]}},
+            )
+            logger.info(f"Credited {transaction['credits']} credits to user {transaction['user_id']}")
+
+    return {"status": "ok"}
 
 
 # ==================== HEALTH CHECK ====================
