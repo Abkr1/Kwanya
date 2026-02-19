@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Install Python dependencies (torch is large, install first for caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu && \
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY . .
