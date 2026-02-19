@@ -442,22 +442,36 @@ export default function KwanyaApp() {
   };
 
   const sendTextMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+    const text = inputText.trim();
+    if (!text || isLoading) return;
 
-    const conversation = await ensureConversation();
-    if (!conversation) return;
+    setIsLoading(true);
+    const messageText = inputText;
+    setInputText('');
+
+    let conversation: Conversation | null;
+    try {
+      conversation = await ensureConversation();
+    } catch (error) {
+      console.error('Failed to create conversation:', error);
+      conversation = null;
+    }
+    if (!conversation) {
+      setIsLoading(false);
+      setInputText(messageText);
+      Alert.alert('Connection Error', 'Could not reach the server. Please check your internet connection and try again.');
+      return;
+    }
 
     const isFirstMessage = messages.length === 0;
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputText,
+      content: messageText,
       timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    const messageText = inputText;
-    setInputText('');
 
     if (isFirstMessage) {
       await autoNameConversation(conversation.id, messageText);
@@ -588,18 +602,16 @@ export default function KwanyaApp() {
           />
         </Pressable>
 
-        {inputText.trim().length > 0 && (
-          <Pressable
-            style={[
-              styles.iconButton,
-              isLoading && styles.iconButtonDisabled,
-            ]}
-            onPress={sendTextMessage}
-            disabled={isLoading || isRecording}
-          >
-            <Ionicons name="send" size={20} color={palette.buttonText} />
-          </Pressable>
-        )}
+        <Pressable
+          style={[
+            styles.iconButton,
+            (!inputText.trim() || isLoading || isRecording) && styles.iconButtonDisabled,
+          ]}
+          onPress={sendTextMessage}
+          disabled={!inputText.trim() || isLoading || isRecording}
+        >
+          <Ionicons name="send" size={20} color={palette.buttonText} />
+        </Pressable>
       </View>
     </View>
   );
@@ -1111,7 +1123,7 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={insets.top}
         >
           <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
@@ -1131,7 +1143,7 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={insets.top}
         >
           <FlatList
