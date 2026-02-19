@@ -7,11 +7,15 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# Install Python dependencies (torch is large, install first for caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Railway sets PORT env var dynamically
+ENV PORT=8001
 EXPOSE 8001
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD uvicorn server:app --host 0.0.0.0 --port ${PORT}
