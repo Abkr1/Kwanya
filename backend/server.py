@@ -36,8 +36,8 @@ import soundfile as sf
 import torchaudio
 import torch
 
-# Emergent integrations for Gemini
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# Google Gemini
+from google import genai
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -568,26 +568,28 @@ async def chat(request: ChatRequest):
             {"conversation_id": request.conversation_id}
         ).sort("timestamp", 1).to_list(100)
 
-        # Initialize Gemini chat
+        # Build conversation history for Gemini
         system_message = """You are a helpful AI assistant that speaks Hausa language.
 You are friendly, knowledgeable, and culturally aware of West African contexts, particularly Nigeria.
 Respond naturally in Hausa language and provide detailed, helpful responses.
 Do not introduce yourself or mention your name; answer directly."""
-        
-        chat_session = LlmChat(
-            api_key=os.environ.get('EMERGENT_LLM_KEY'),
-            session_id=request.conversation_id,
-            system_message=system_message
-        )
-        
-        # Configure to use Gemini
-        chat_session.with_model("gemini", "gemini-3-flash-preview")
-        
-        # Create user message
-        user_message = UserMessage(text=request.message)
-        
+
+        gemini_client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'))
+
+        # Build history from previous messages (exclude the one we just saved)
+        history = []
+        for msg in messages[:-1]:
+            role = "user" if msg["role"] == "user" else "model"
+            history.append(genai.types.Content(role=role, parts=[genai.types.Part(text=msg["content"])]))
+
         # Get response from Gemini
-        response = await chat_session.send_message(user_message)
+        gemini_response = await asyncio.to_thread(
+            gemini_client.models.generate_content,
+            model="gemini-2.0-flash",
+            contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
+            config=genai.types.GenerateContentConfig(system_instruction=system_message),
+        )
+        response = gemini_response.text
         
         # Save assistant message to database
         assistant_message = Message(

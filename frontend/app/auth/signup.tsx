@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,17 +11,12 @@ import {
   Alert,
   Modal,
   FlatList,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-
-WebBrowser.maybeCompleteAuthSession();
 
 type SignupMode = 'phone' | 'email';
 
@@ -65,12 +60,6 @@ export default function SignupScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signUpWithPhone, signUpWithEmail, signUpWithGoogle } = useAuth();
-
-  const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID,
-  });
 
   const [mode, setMode] = useState<SignupMode>('phone');
   const [phone, setPhone] = useState('');
@@ -134,33 +123,45 @@ export default function SignupScreen() {
     }
   };
 
-  useEffect(() => {
-    if (googleResponse?.type === 'success') {
-      const idToken = googleResponse.authentication?.idToken;
-      if (idToken) {
-        (async () => {
+  const handleGoogleSignup = async () => {
+    try {
+      const WebBrowser = await import('expo-web-browser');
+      WebBrowser.maybeCompleteAuthSession();
+
+      const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        Alert.alert(
+          'Google Sign-Up',
+          'Google sign-in is not configured. Please set up Google OAuth client IDs in your environment.',
+        );
+        return;
+      }
+
+      const { makeRedirectUri } = await import('expo-auth-session');
+      const redirectUri = makeRedirectUri({ scheme: 'menene' });
+
+      const result = await WebBrowser.openAuthSessionAsync(
+        `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token%20id_token&scope=openid%20email%20profile&nonce=${Math.random().toString(36).substring(7)}`,
+        redirectUri,
+      );
+
+      if (result.type === 'success' && result.url) {
+        const params = new URLSearchParams(result.url.split('#')[1]);
+        const idToken = params.get('id_token');
+        if (idToken) {
           setIsLoading(true);
-          const result = await signUpWithGoogle(idToken, displayName.trim() || undefined);
+          const authResult = await signUpWithGoogle(idToken, displayName.trim() || undefined);
           setIsLoading(false);
-          if (result.success) {
+          if (authResult.success) {
             router.replace('/');
           } else {
-            Alert.alert('Google Sign-Up Failed', result.error || 'Please try again');
+            Alert.alert('Google Sign-Up Failed', authResult.error || 'Please try again');
           }
-        })();
+        }
       }
+    } catch (e: any) {
+      Alert.alert('Google Sign-Up', e.message || 'Google sign-up failed');
     }
-  }, [googleResponse]);
-
-  const handleGoogleSignup = async () => {
-    if (!googleRequest) {
-      Alert.alert(
-        'Google Sign-Up',
-        'Google sign-in is not configured. Please set up Google OAuth client IDs in your environment.',
-      );
-      return;
-    }
-    await googlePromptAsync();
   };
 
   const handleSignup = () => {
