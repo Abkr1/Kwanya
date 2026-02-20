@@ -397,17 +397,22 @@ async def send_sms_otp(phone: str, otp: str) -> bool:
         return False
     try:
         async with httpx.AsyncClient(timeout=15) as http:
-            resp = await http.post(
-                "https://api.ng.termii.com/api/sms/send",
-                json={
-                    "to": phone,
-                    "from": TERMII_SENDER_ID,
-                    "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
-                    "type": "plain",
-                    "channel": "generic",
-                    "api_key": TERMII_API_KEY,
-                },
-            )
+            # Try registered sender ID on generic channel first
+            payload = {
+                "to": phone,
+                "from": TERMII_SENDER_ID,
+                "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
+                "type": "plain",
+                "channel": "generic",
+                "api_key": TERMII_API_KEY,
+            }
+            resp = await http.post("https://api.ng.termii.com/api/sms/send", json=payload)
+            if resp.status_code == 404 or (resp.status_code == 200 and resp.json().get("code") == 404):
+                # Sender ID not approved yet — fall back to DND route
+                logger.warning(f"Sender ID '{TERMII_SENDER_ID}' not approved, using DND fallback")
+                payload["from"] = "N-Alert"
+                payload["channel"] = "dnd"
+                resp = await http.post("https://api.ng.termii.com/api/sms/send", json=payload)
             resp.raise_for_status()
             logger.info(f"SMS OTP sent to {phone[-4:]}")
             return True
