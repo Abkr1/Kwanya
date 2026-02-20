@@ -60,8 +60,7 @@ TERMII_API_KEY = os.environ.get("TERMII_API_KEY", "")
 TERMII_SENDER_ID = os.environ.get("TERMII_SENDER_ID", "Kwanya")
 
 # Resend Email Configuration
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "verify@yourdomain.com")
+TERMII_EMAIL_CONFIG_ID = os.environ.get("TERMII_EMAIL_CONFIG_ID", "")
 
 # Monnify Configuration
 MONNIFY_API_KEY = os.environ.get("MONNIFY_API_KEY", "")
@@ -418,37 +417,26 @@ async def send_sms_otp(phone: str, otp: str) -> bool:
 
 
 async def send_verification_email(email: str, code: str) -> bool:
-    """Send verification code via Resend email API. Returns True on success."""
-    if not RESEND_API_KEY or RESEND_API_KEY.startswith("<"):
-        logger.warning(f"Resend not configured — code for {email}: {code}")
+    """Send verification code via Termii Email Token API. Returns True on success."""
+    if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
+        logger.warning(f"Termii not configured — email code for {email}: {code}")
         return False
     try:
-        html_body = f"""
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-            <h2 style="color:#1a1a1a;margin-bottom:8px">Verify your email</h2>
-            <p style="color:#555;font-size:15px">Enter this code in the Kwanya app to verify your email address:</p>
-            <div style="background:#f4f4f5;border-radius:8px;padding:20px;text-align:center;margin:24px 0">
-                <span style="font-size:32px;font-weight:700;letter-spacing:6px;color:#1a1a1a">{code}</span>
-            </div>
-            <p style="color:#888;font-size:13px">This code expires in 10 minutes. If you didn't request this, ignore this email.</p>
-        </div>
-        """
         async with httpx.AsyncClient(timeout=15) as http:
             resp = await http.post(
-                "https://api.resend.com/emails",
-                headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+                "https://api.ng.termii.com/api/email/otp/send",
                 json={
-                    "from": f"Kwanya <{RESEND_FROM_EMAIL}>",
-                    "to": [email],
-                    "subject": f"Your Kwanya verification code: {code}",
-                    "html": html_body,
+                    "api_key": TERMII_API_KEY,
+                    "email_address": email,
+                    "code": code,
+                    "email_configuration_id": TERMII_EMAIL_CONFIG_ID,
                 },
             )
             resp.raise_for_status()
-            logger.info(f"Verification email sent to {email}")
+            logger.info(f"Verification email sent via Termii to {email}")
             return True
     except Exception as e:
-        logger.error(f"Resend email failed for {email}: {e}")
+        logger.error(f"Termii email failed for {email}: {e}")
         return False
 
 

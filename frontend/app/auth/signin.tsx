@@ -20,7 +20,7 @@ export default function SigninScreen() {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn } = useAuth();
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -45,56 +45,6 @@ export default function SigninScreen() {
       router.replace('/');
     } else {
       Alert.alert('Sign In Failed', result.error || 'Invalid credentials');
-    }
-  };
-
-  const handleGoogleSignin = async () => {
-    try {
-      const WebBrowser = await import('expo-web-browser');
-      const Google = await import('expo-auth-session/providers/google');
-      WebBrowser.maybeCompleteAuthSession();
-
-      const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
-      if (!clientId) {
-        Alert.alert(
-          'Google Sign-In',
-          'Google sign-in is not configured. Please set up Google OAuth client IDs in your environment.',
-        );
-        return;
-      }
-
-      const { makeRedirectUri } = await import('expo-auth-session');
-      const redirectUri = makeRedirectUri({ scheme: 'menene' });
-
-      const discovery = {
-        authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-        tokenEndpoint: 'https://oauth2.googleapis.com/token',
-      };
-
-      const { AuthSession } = await import('expo-auth-session');
-
-      // Use promptAsync approach via WebBrowser
-      const result = await WebBrowser.openAuthSessionAsync(
-        `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token%20id_token&scope=openid%20email%20profile&nonce=${Math.random().toString(36).substring(7)}`,
-        redirectUri,
-      );
-
-      if (result.type === 'success' && result.url) {
-        const params = new URLSearchParams(result.url.split('#')[1]);
-        const idToken = params.get('id_token');
-        if (idToken) {
-          setIsLoading(true);
-          const authResult = await signInWithGoogle(idToken);
-          setIsLoading(false);
-          if (authResult.success) {
-            router.replace('/');
-          } else {
-            Alert.alert('Google Sign-In Failed', authResult.error || 'Please try again');
-          }
-        }
-      }
-    } catch (e: any) {
-      Alert.alert('Google Sign-In', e.message || 'Google sign-in failed');
     }
   };
 
@@ -200,46 +150,6 @@ export default function SigninScreen() {
       fontWeight: '700',
       color: palette.buttonText,
     },
-    divider: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginVertical: 24,
-    },
-    dividerLine: {
-      flex: 1,
-      height: 1,
-      backgroundColor: palette.border,
-    },
-    dividerText: {
-      marginHorizontal: 16,
-      fontSize: 14,
-      color: palette.textSubtle,
-    },
-    socialButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: palette.border,
-      backgroundColor: palette.bg,
-      marginBottom: 12,
-    },
-    socialButtonText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: palette.text,
-      marginLeft: 10,
-    },
-    googleIcon: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      backgroundColor: palette.google,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     signupLink: {
       flexDirection: 'row',
       justifyContent: 'center',
@@ -330,21 +240,6 @@ export default function SigninScreen() {
             ) : (
               <Text style={styles.signinButtonText}>Sign In</Text>
             )}
-          </TouchableOpacity>
-
-          {/* Divider */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Google */}
-          <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignin}>
-            <View style={styles.googleIcon}>
-              <Ionicons name="logo-google" size={12} color={palette.accentText} />
-            </View>
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
           </TouchableOpacity>
 
           {/* Sign up link */}
