@@ -59,7 +59,7 @@ export default function SignupScreen() {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signUpWithPhone, signUpWithEmail, signUpWithGoogle } = useAuth();
+  const { signUpWithPhone, signUpWithEmail } = useAuth();
 
   const [mode, setMode] = useState<SignupMode>('phone');
   const [phone, setPhone] = useState('');
@@ -120,47 +120,6 @@ export default function SignupScreen() {
       router.replace({ pathname: '/auth/verify-email', params: { email: email.trim() } });
     } else {
       Alert.alert('Sign Up Failed', result.error || 'Please try again');
-    }
-  };
-
-  const handleGoogleSignup = async () => {
-    try {
-      const WebBrowser = await import('expo-web-browser');
-      WebBrowser.maybeCompleteAuthSession();
-
-      const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
-      if (!clientId) {
-        Alert.alert(
-          'Google Sign-Up',
-          'Google sign-in is not configured. Please set up Google OAuth client IDs in your environment.',
-        );
-        return;
-      }
-
-      const { makeRedirectUri } = await import('expo-auth-session');
-      const redirectUri = makeRedirectUri({ scheme: 'menene' });
-
-      const result = await WebBrowser.openAuthSessionAsync(
-        `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token%20id_token&scope=openid%20email%20profile&nonce=${Math.random().toString(36).substring(7)}`,
-        redirectUri,
-      );
-
-      if (result.type === 'success' && result.url) {
-        const params = new URLSearchParams(result.url.split('#')[1]);
-        const idToken = params.get('id_token');
-        if (idToken) {
-          setIsLoading(true);
-          const authResult = await signUpWithGoogle(idToken, displayName.trim() || undefined);
-          setIsLoading(false);
-          if (authResult.success) {
-            router.replace('/');
-          } else {
-            Alert.alert('Google Sign-Up Failed', authResult.error || 'Please try again');
-          }
-        }
-      }
-    } catch (e: any) {
-      Alert.alert('Google Sign-Up', e.message || 'Google sign-up failed');
     }
   };
 
@@ -330,14 +289,6 @@ export default function SignupScreen() {
       fontWeight: '600',
       color: palette.text,
       marginLeft: 10,
-    },
-    googleIcon: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      backgroundColor: palette.google,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     signinLink: {
       flexDirection: 'row',
@@ -617,14 +568,6 @@ export default function SignupScreen() {
               <Text style={styles.socialButtonText}>Continue with Phone</Text>
             </TouchableOpacity>
           )}
-
-          {/* Google */}
-          <TouchableOpacity style={styles.socialButton} onPress={handleGoogleSignup}>
-            <View style={styles.googleIcon}>
-              <Ionicons name="logo-google" size={12} color={palette.accentText} />
-            </View>
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
-          </TouchableOpacity>
 
           {/* Sign in link */}
           <TouchableOpacity style={styles.signinLink} onPress={() => router.replace('/auth/signin')}>
