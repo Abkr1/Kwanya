@@ -149,6 +149,8 @@ export default function KwanyaApp() {
   useEffect(() => {
     if (sidebarVisible) {
       setSidebarMounted(true);
+      // Refresh history when sidebar opens
+      if (userId) loadConversationHistory();
       sidebarTranslateX.setValue(-sidebarWidth);
       backdropOpacity.setValue(0);
       Animated.parallel([
@@ -306,7 +308,25 @@ export default function KwanyaApp() {
         title: title
       });
 
-      await loadConversationHistory();
+      // Update the title in-place instead of reloading the entire list
+      setConversationHistory((prev) => {
+        const exists = prev.some((c) => c.id === conversationId);
+        if (exists) {
+          return prev.map((c) =>
+            c.id === conversationId ? { ...c, title } : c
+          );
+        }
+        // If conversation isn't in the list yet, add it to the top
+        const newConv: Conversation = {
+          id: conversationId,
+          user_id: userId!,
+          title,
+          language: 'ha',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        return [newConv, ...prev];
+      });
     } catch (error) {
       console.error('Failed to auto-name conversation:', error);
     }
@@ -1081,15 +1101,19 @@ export default function KwanyaApp() {
               <Text style={styles.chatHistoryTitle}>
                 Chat History
               </Text>
-              <ScrollView style={styles.chatHistoryList} showsVerticalScrollIndicator={false}>
-                {conversationHistory.length === 0 ? (
-                  <Text style={styles.noChatText}>
-                    No previous chats
-                  </Text>
-                ) : (
-                  conversationHistory.map((conv) => (
+              {conversationHistory.length === 0 ? (
+                <Text style={styles.noChatText}>
+                  No previous chats
+                </Text>
+              ) : (
+                <FlatList
+                  data={conversationHistory}
+                  keyExtractor={(item) => item.id}
+                  style={styles.chatHistoryList}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item: conv }) => (
                     <Pressable
-                      key={conv.id}
                       style={[
                         styles.chatHistoryItem,
                         currentConversation?.id === conv.id && styles.chatHistoryItemActive,
@@ -1111,9 +1135,9 @@ export default function KwanyaApp() {
                         {conv.title || 'New Conversation'}
                       </Text>
                     </Pressable>
-                  ))
-                )}
-              </ScrollView>
+                  )}
+                />
+              )}
             </View>
           </Animated.View>
         </View>
@@ -1123,7 +1147,7 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={insets.top}
         >
           <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
@@ -1143,7 +1167,7 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={insets.top}
         >
           <FlatList

@@ -20,12 +20,12 @@ import { useTheme } from './_contexts/ThemeContext';
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 
 const CREDIT_PACKS = [
-  { credits: 100, price: 500, label: '100 Credits', priceLabel: '\u20A6500' },
-  { credits: 500, price: 2000, label: '500 Credits', priceLabel: '\u20A62,000' },
-  { credits: 1000, price: 3500, label: '1,000 Credits', priceLabel: '\u20A63,500' },
+  { credits: 100, price: 100, label: '100 Credits', priceLabel: '\u20A6100' },
+  { credits: 200, price: 200, label: '200 Credits', priceLabel: '\u20A6200' },
+  { credits: 500, price: 500, label: '500 Credits', priceLabel: '\u20A6500' },
 ];
 
-const CREDIT_RATE = 5; // N5 per credit
+const CREDIT_RATE = 1; // N1 per credit
 const MIN_AMOUNT = 100;
 
 export default function CreditsScreen() {

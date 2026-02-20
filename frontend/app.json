@@ -27,6 +27,7 @@
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "adjustResize",
       "package": "com.trulib.kwanya"
     },
     "web": {
