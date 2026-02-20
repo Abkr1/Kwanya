@@ -1234,11 +1234,61 @@ async def verify_payment(
         return {"success": True, "status": "pending"}
 
 
-# ==================== MONNIFY WEBHOOK (no API key auth) ====================
+# ==================== MONNIFY OFFLINE PAYMENT & WEBHOOK ====================
+
+@app.post("/api/monnify/verify-payer")
+async def monnify_verify_payer(request: Request):
+    """Payer verification endpoint for Monnify offline payments.
+    Called when a customer pays at a Moniepoint agent location."""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=200,
+            content={"responseCode": "01", "responseMessage": "Invalid request"},
+        )
+
+    customer_id = data.get("customerId", "")
+    product_code = data.get("productCode", "")
+
+    if not customer_id:
+        return JSONResponse(
+            status_code=200,
+            content={"responseCode": "01", "responseMessage": "Customer ID is required"},
+        )
+
+    # Look up user by phone number, email, or user ID
+    user = await db.users.find_one({
+        "$or": [
+            {"phone": customer_id},
+            {"email": customer_id},
+            {"id": customer_id},
+        ]
+    })
+
+    if not user:
+        logger.warning(f"Monnify payer verification failed — customer not found: {customer_id}")
+        return JSONResponse(
+            status_code=200,
+            content={"responseCode": "01", "responseMessage": "Customer not found"},
+        )
+
+    display_name = user.get("display_name") or user.get("phone") or user.get("email") or "Kwanya User"
+
+    logger.info(f"Monnify payer verified: {customer_id} → {display_name}")
+    return JSONResponse(
+        status_code=200,
+        content={
+            "responseCode": "00",
+            "responseMessage": "Success",
+            "customerName": display_name,
+        },
+    )
+
 
 @app.post("/api/webhooks/monnify")
 async def monnify_webhook(request: Request):
-    """Handle Monnify payment webhook notifications"""
+    """Handle Monnify payment webhook notifications (online and offline)"""
     body = await request.body()
 
     # Verify Monnify signature
@@ -1252,36 +1302,76 @@ async def monnify_webhook(request: Request):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
     payload = json.loads(body)
-
+    event_type = payload.get("eventType", "")
     event_data = payload.get("eventData", {})
     payment_reference = event_data.get("paymentReference", "")
     payment_status = event_data.get("paymentStatus", "")
-    amount_paid = event_data.get("amountPaid", 0)
+    amount_paid = float(event_data.get("amountPaid", 0))
+
+    logger.info(f"Monnify webhook: event={event_type}, ref={payment_reference}, status={payment_status}, amount={amount_paid}")
 
     if not payment_reference:
         return {"status": "ignored"}
 
+    # Check for existing transaction (online payment flow)
     transaction = await db.transactions.find_one({"payment_reference": payment_reference})
-    if not transaction:
-        logger.warning(f"Webhook for unknown payment reference: {payment_reference}")
-        return {"status": "ignored"}
 
-    if payment_status == "PAID" and amount_paid >= transaction["amount"]:
-        # Atomically mark as completed (idempotent)
-        result = await db.transactions.update_one(
-            {"payment_reference": payment_reference, "status": "pending"},
-            {"$set": {
-                "status": "completed",
-                "completed_at": datetime.now(timezone.utc),
-                "transaction_reference": event_data.get("transactionReference"),
-            }},
-        )
-        if result.modified_count > 0:
-            await db.users.update_one(
-                {"id": transaction["user_id"]},
-                {"$inc": {"credit_balance": transaction["credits"]}},
+    if transaction:
+        # Online payment — match existing transaction
+        if (payment_status == "PAID" or event_type == "SUCCESSFUL_TRANSACTION") and amount_paid >= transaction["amount"]:
+            result = await db.transactions.update_one(
+                {"payment_reference": payment_reference, "status": "pending"},
+                {"$set": {
+                    "status": "completed",
+                    "completed_at": datetime.now(timezone.utc),
+                    "transaction_reference": event_data.get("transactionReference"),
+                }},
             )
-            logger.info(f"Credited {transaction['credits']} credits to user {transaction['user_id']}")
+            if result.modified_count > 0:
+                await db.users.update_one(
+                    {"id": transaction["user_id"]},
+                    {"$inc": {"credit_balance": transaction["credits"]}},
+                )
+                logger.info(f"Credited {transaction['credits']} credits to user {transaction['user_id']}")
+    else:
+        # Offline payment — no pre-existing transaction, create one from webhook data
+        if payment_status == "PAID" or event_type == "SUCCESSFUL_TRANSACTION":
+            customer_id = event_data.get("customer", {}).get("email") or event_data.get("customer", {}).get("name", "")
+            product_code = event_data.get("productCode", "")
+
+            # Find user by customer identifier
+            user = await db.users.find_one({
+                "$or": [
+                    {"phone": customer_id},
+                    {"email": customer_id},
+                    {"id": customer_id},
+                ]
+            }) if customer_id else None
+
+            if user and amount_paid > 0:
+                credits = int(amount_paid)  # 1:1 Naira to credits ratio
+
+                # Idempotency check — don't process same reference twice
+                existing = await db.transactions.find_one({"payment_reference": payment_reference})
+                if not existing:
+                    await db.transactions.insert_one({
+                        "user_id": user["id"],
+                        "payment_reference": payment_reference,
+                        "transaction_reference": event_data.get("transactionReference"),
+                        "amount": amount_paid,
+                        "credits": credits,
+                        "status": "completed",
+                        "type": "offline",
+                        "created_at": datetime.now(timezone.utc),
+                        "completed_at": datetime.now(timezone.utc),
+                    })
+                    await db.users.update_one(
+                        {"id": user["id"]},
+                        {"$inc": {"credit_balance": credits}},
+                    )
+                    logger.info(f"Offline payment: credited {credits} credits to user {user['id']}")
+            else:
+                logger.warning(f"Offline webhook — could not match user for ref: {payment_reference}, customer: {customer_id}")
 
     return {"status": "ok"}
 
