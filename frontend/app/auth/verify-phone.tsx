@@ -205,13 +205,6 @@ export default function VerifyPhoneScreen() {
       fontWeight: '600',
       color: palette.text,
     },
-    skipButton: {
-      paddingVertical: 12,
-    },
-    skipText: {
-      fontSize: 15,
-      color: palette.textSubtle,
-    },
   }), [palette, insets]);
 
   return (
@@ -276,10 +269,6 @@ export default function VerifyPhoneScreen() {
             </Text>
           </TouchableOpacity>
 
-          {/* Skip */}
-          <TouchableOpacity style={styles.skipButton} onPress={() => router.replace('/')}>
-            <Text style={styles.skipText}>Skip for now</Text>
-          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </View>
