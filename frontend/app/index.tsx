@@ -613,8 +613,7 @@ export default function KwanyaApp() {
     const isUser = item.role === 'user';
 
     return (
-      <Pressable
-        onLongPress={() => copyToClipboard(item.content, 'Message')}
+      <View
         style={[
           styles.messageContainer,
           isUser ? styles.userMessage : styles.assistantMessage,
@@ -625,10 +624,25 @@ export default function KwanyaApp() {
             styles.messageText,
             isUser ? styles.userMessageText : styles.assistantMessageText,
           ]}
+          selectable
         >
           {item.content}
         </Text>
-      </Pressable>
+        <Pressable
+          onPress={() => copyToClipboard(item.content, 'Message')}
+          hitSlop={6}
+          style={[
+            styles.copyButton,
+            isUser ? styles.copyButtonUser : styles.copyButtonAssistant,
+          ]}
+        >
+          <Ionicons
+            name="copy-outline"
+            size={14}
+            color={isUser ? palette.userBubbleText : palette.textSubtle}
+          />
+        </Pressable>
+      </View>
     );
   };
 
@@ -901,6 +915,17 @@ export default function KwanyaApp() {
     },
     assistantMessageText: {
       color: palette.text,
+    },
+    copyButton: {
+      alignSelf: 'flex-end',
+      marginTop: 4,
+      padding: 2,
+    },
+    copyButtonUser: {
+      opacity: 0.6,
+    },
+    copyButtonAssistant: {
+      opacity: 0.5,
     },
     emptyStateBody: {
       flex: 1,
