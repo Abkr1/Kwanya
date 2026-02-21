@@ -482,9 +482,16 @@ async def transcribe_audio(
             )
         credits_deducted = True
     else:
-        total_messages = await db.messages.count_documents(
-            {"conversation_id": conversation_id, "role": "user"}
-        )
+        # Unauthenticated — enforce free message limit across ALL conversations
+        user_conversations = await db.conversations.find(
+            {"user_id": user_id}
+        ).to_list(None)
+        conv_ids = [c["id"] for c in user_conversations]
+        total_messages = 0
+        if conv_ids:
+            total_messages = await db.messages.count_documents(
+                {"conversation_id": {"$in": conv_ids}, "role": "user"}
+            )
         if total_messages >= FREE_MESSAGE_LIMIT:
             raise HTTPException(
                 status_code=402,
@@ -613,10 +620,16 @@ async def chat(request: ChatRequest):
                     detail=f"Insufficient credits. You need {CHAT_CREDIT_COST} credit(s) to send a message.",
                 )
         else:
-            # Unauthenticated — enforce free message limit
-            total_messages = await db.messages.count_documents(
-                {"conversation_id": request.conversation_id, "role": "user"}
-            )
+            # Unauthenticated — enforce free message limit across ALL conversations
+            user_conversations = await db.conversations.find(
+                {"user_id": request.user_id}
+            ).to_list(None)
+            conv_ids = [c["id"] for c in user_conversations]
+            total_messages = 0
+            if conv_ids:
+                total_messages = await db.messages.count_documents(
+                    {"conversation_id": {"$in": conv_ids}, "role": "user"}
+                )
             if total_messages >= FREE_MESSAGE_LIMIT:
                 raise HTTPException(
                     status_code=402,
