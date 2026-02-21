@@ -8,6 +8,8 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -428,82 +430,92 @@ export default function CreditsScreen() {
         <Text style={styles.headerTitle}>Credits</Text>
       </View>
 
-      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Balance Card */}
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Your Balance</Text>
-          <Text style={styles.balanceValue}>{balance.toLocaleString()}</Text>
-          <Text style={styles.balanceUnit}>credits</Text>
-        </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={insets.top}
+      >
+        <ScrollView
+          style={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Balance Card */}
+          <View style={styles.balanceCard}>
+            <Text style={styles.balanceLabel}>Your Balance</Text>
+            <Text style={styles.balanceValue}>{balance.toLocaleString()}</Text>
+            <Text style={styles.balanceUnit}>credits</Text>
+          </View>
 
-        {/* Preset Packs */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Buy Credits</Text>
-          {CREDIT_PACKS.map((pack) => (
-            <View key={pack.credits} style={styles.packCard}>
-              <View style={styles.packInfo}>
-                <Text style={styles.packCredits}>{pack.label}</Text>
-                <Text style={styles.packPrice}>{pack.priceLabel}</Text>
+          {/* Preset Packs */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Buy Credits</Text>
+            {CREDIT_PACKS.map((pack) => (
+              <View key={pack.credits} style={styles.packCard}>
+                <View style={styles.packInfo}>
+                  <Text style={styles.packCredits}>{pack.label}</Text>
+                  <Text style={styles.packPrice}>{pack.priceLabel}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.buyButton}
+                  onPress={() => handleBuy(pack.price, pack.credits)}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color={palette.buttonText} />
+                  ) : (
+                    <Text style={styles.buyButtonText}>Buy</Text>
+                  )}
+                </TouchableOpacity>
               </View>
+            ))}
+          </View>
+
+          {/* Custom Amount */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Custom Amount</Text>
+            <View style={styles.customCard}>
+              <Text style={styles.customLabel}>Amount (NGN)</Text>
+              <TextInput
+                style={styles.customInput}
+                value={customAmount}
+                onChangeText={setCustomAmount}
+                placeholder={`Min \u20A6${MIN_AMOUNT}`}
+                placeholderTextColor={palette.textSubtle}
+                keyboardType="numeric"
+              />
+              {customCredits > 0 && (
+                <Text style={styles.customCreditsText}>
+                  You'll get {customCredits.toLocaleString()} credits
+                </Text>
+              )}
               <TouchableOpacity
-                style={styles.buyButton}
-                onPress={() => handleBuy(pack.price, pack.credits)}
-                disabled={isLoading}
+                style={[
+                  styles.customBuyButton,
+                  customCredits === 0 && styles.customBuyButtonDisabled,
+                ]}
+                onPress={() => {
+                  const amt = parseFloat(customAmount);
+                  if (amt >= MIN_AMOUNT && customCredits > 0) {
+                    handleBuy(amt, customCredits);
+                  }
+                }}
+                disabled={customCredits === 0 || isLoading}
               >
                 {isLoading ? (
                   <ActivityIndicator size="small" color={palette.buttonText} />
                 ) : (
-                  <Text style={styles.buyButtonText}>Buy</Text>
+                  <Text style={styles.customBuyButtonText}>
+                    {customCredits > 0
+                      ? `Buy ${customCredits.toLocaleString()} Credits`
+                      : 'Enter Amount'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
-          ))}
-        </View>
-
-        {/* Custom Amount */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Custom Amount</Text>
-          <View style={styles.customCard}>
-            <Text style={styles.customLabel}>Amount (NGN)</Text>
-            <TextInput
-              style={styles.customInput}
-              value={customAmount}
-              onChangeText={setCustomAmount}
-              placeholder={`Min \u20A6${MIN_AMOUNT}`}
-              placeholderTextColor={palette.textSubtle}
-              keyboardType="numeric"
-            />
-            {customCredits > 0 && (
-              <Text style={styles.customCreditsText}>
-                You'll get {customCredits.toLocaleString()} credits
-              </Text>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.customBuyButton,
-                customCredits === 0 && styles.customBuyButtonDisabled,
-              ]}
-              onPress={() => {
-                const amt = parseFloat(customAmount);
-                if (amt >= MIN_AMOUNT && customCredits > 0) {
-                  handleBuy(amt, customCredits);
-                }
-              }}
-              disabled={customCredits === 0 || isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color={palette.buttonText} />
-              ) : (
-                <Text style={styles.customBuyButtonText}>
-                  {customCredits > 0
-                    ? `Buy ${customCredits.toLocaleString()} Credits`
-                    : 'Enter Amount'}
-                </Text>
-              )}
-            </TouchableOpacity>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
