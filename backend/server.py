@@ -579,8 +579,8 @@ async def transcribe_audio(
 
 # ==================== CHAT ENDPOINT ====================
 
-CHAT_CREDIT_COST = 1   # credits per text message
-VOICE_CREDIT_COST = 2  # credits per voice message
+CHAT_CREDIT_COST = 3   # credits (₦3) per text message
+VOICE_CREDIT_COST = 3  # credits (₦3) per voice message
 CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
 FREE_MESSAGE_LIMIT = 10  # free messages for unauthenticated users
 WELCOME_BONUS_CREDITS = 20  # free credits for new signups
