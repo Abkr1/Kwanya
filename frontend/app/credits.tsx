@@ -82,8 +82,14 @@ export default function CreditsScreen() {
       pollCountRef.current = 0;
       pollTimerRef.current = setInterval(async () => {
         pollCountRef.current += 1;
-        if (pollCountRef.current > 10) {
+        if (pollCountRef.current > 40) {
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+          setCheckoutUrl(null);
+          setCurrentPaymentRef(null);
+          Alert.alert(
+            'Payment Pending',
+            'We could not confirm your payment yet. If you completed the payment, your credits will be added shortly.',
+          );
           return;
         }
         try {

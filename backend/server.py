@@ -1263,8 +1263,8 @@ async def initialize_payment(
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "amount": request.amount,
-                    "customerName": user.get("display_name") or user["email"],
-                    "customerEmail": user["email"],
+                    "customerName": user.get("display_name") or user.get("email") or user.get("phone") or "Kwanya User",
+                    "customerEmail": user.get("email") or f"{user['id']}@kwanya.app",
                     "paymentReference": payment_reference,
                     "paymentDescription": f"Purchase {request.credits} Kwanya credits",
                     "currencyCode": "NGN",
