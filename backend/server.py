@@ -1161,6 +1161,31 @@ async def signout():
     return {"success": True, "message": "Signed out successfully"}
 
 
+@auth_router.delete("/account")
+async def delete_account(authorization: Optional[str] = Header(None)):
+    """Permanently delete user account and all associated data"""
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user_id = user["id"]
+
+    # Delete all conversations and messages
+    convos = await db.conversations.find({"user_id": user_id}, {"id": 1}).to_list(None)
+    convo_ids = [c["id"] for c in convos]
+    if convo_ids:
+        await db.messages.delete_many({"conversation_id": {"$in": convo_ids}})
+        await db.conversations.delete_many({"user_id": user_id})
+
+    # Delete payment/credit records
+    await db.credit_transactions.delete_many({"user_id": user_id})
+
+    # Delete user
+    await db.users.delete_one({"id": user_id})
+
+    return {"success": True, "message": "Account deleted successfully"}
+
+
 # ==================== MONNIFY HELPERS ====================
 
 async def get_monnify_token() -> str:

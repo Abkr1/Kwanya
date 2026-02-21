@@ -1105,11 +1105,11 @@ export default function KwanyaApp() {
                   color={palette.textMuted}
                 />
               </Pressable>
-              <Pressable style={[styles.menuOption, { opacity: 0.4 }]} disabled>
+              <Pressable style={styles.menuOption} onPress={() => router.push('/settings')}>
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>Settings</Text>
                 <View style={styles.menuOptionSpacer} />
-                <Text style={{ fontSize: 11, color: palette.textSubtle }}>Coming soon</Text>
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
             </View>
 
