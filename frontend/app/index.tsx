@@ -451,11 +451,35 @@ export default function KwanyaApp() {
       const axiosErr = error as AxiosError<{ detail?: string }>;
       console.error('Transcription error:', error);
       const status = axiosErr.response?.status;
-      let msg = axiosErr.response?.data?.detail || 'Failed to transcribe audio';
-      if (status === 520 || status === 522 || status === 524) {
-        msg = 'Server is taking too long to respond. The speech model may still be loading — please try again in a moment.';
+      if (status === 402) {
+        const detail = axiosErr.response?.data?.detail || '';
+        if (!isAuthenticated || detail.includes('Sign up')) {
+          Alert.alert(
+            'Free Messages Used',
+            'Sign up to get 20 free credits and continue chatting!',
+            [
+              { text: 'Sign Up', onPress: () => router.push('/auth/signup') },
+              { text: 'Sign In', onPress: () => router.push('/auth/signin') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(
+            'Insufficient Credits',
+            detail || 'You need more credits to send voice messages.',
+            [
+              { text: 'Buy Credits', onPress: () => router.push('/credits') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        }
+      } else {
+        let msg = axiosErr.response?.data?.detail || 'Failed to transcribe audio';
+        if (status === 520 || status === 522 || status === 524) {
+          msg = 'Server is taking too long to respond. The speech model may still be loading — please try again in a moment.';
+        }
+        Alert.alert('Error', msg);
       }
-      Alert.alert('Error', msg);
     } finally {
       setIsLoading(false);
     }
@@ -548,7 +572,31 @@ export default function KwanyaApp() {
         return;
       }
       console.error('Chat error:', error);
-      Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to get response');
+      if (axiosErr.response?.status === 402) {
+        const detail = axiosErr.response?.data?.detail || '';
+        if (!isAuthenticated || detail.includes('Sign up')) {
+          Alert.alert(
+            'Free Messages Used',
+            'Sign up to get 20 free credits and continue chatting!',
+            [
+              { text: 'Sign Up', onPress: () => router.push('/auth/signup') },
+              { text: 'Sign In', onPress: () => router.push('/auth/signin') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(
+            'Insufficient Credits',
+            detail || 'You need more credits to continue chatting.',
+            [
+              { text: 'Buy Credits', onPress: () => router.push('/credits') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        }
+      } else {
+        Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to get response');
+      }
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;

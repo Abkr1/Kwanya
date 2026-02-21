@@ -469,6 +469,28 @@ async def transcribe_audio(
     conversation_id: str = File(...)
 ):
     """Transcribe Hausa audio using Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)"""
+    # Check credits / free message limit
+    user = await db.users.find_one({"id": user_id}) if user_id else None
+    is_authenticated = user is not None
+    credits_deducted = False
+
+    if is_authenticated:
+        if not await deduct_credits(user_id, VOICE_CREDIT_COST):
+            raise HTTPException(
+                status_code=402,
+                detail=f"Insufficient credits. You need {VOICE_CREDIT_COST} credits to send a voice message.",
+            )
+        credits_deducted = True
+    else:
+        total_messages = await db.messages.count_documents(
+            {"conversation_id": conversation_id, "role": "user"}
+        )
+        if total_messages >= FREE_MESSAGE_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+            )
+
     temp_path = None
     wav_path = None
     try:
@@ -503,31 +525,39 @@ async def transcribe_audio(
             )
         except asyncio.TimeoutError:
             raise Exception("Transcription timed out. The ASR model may still be loading — please try again.")
-        
+
         # Save message to database
         message = Message(
             conversation_id=conversation_id,
             role="user",
             content=transcribed_text
         )
-        
+
         await db.messages.insert_one(message.model_dump())
-        
+
         # Update conversation timestamp
         await db.conversations.update_one(
             {"id": conversation_id},
             {"$set": {"updated_at": datetime.now(timezone.utc)}}
         )
-        
+
         logger.info(f"Transcription successful: {transcribed_text[:50]}...")
-        
+
+        remaining = user["credit_balance"] - VOICE_CREDIT_COST if is_authenticated else None
         return {
             "success": True,
             "transcription": transcribed_text,
-            "message_id": message.id
+            "message_id": message.id,
+            "credits_used": VOICE_CREDIT_COST if is_authenticated else 0,
+            "credit_balance": remaining,
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
+        # Refund credits on failure
+        if credits_deducted:
+            await refund_credits(user_id, VOICE_CREDIT_COST)
         logger.error(f"Transcription error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
     finally:
@@ -542,11 +572,56 @@ async def transcribe_audio(
 
 # ==================== CHAT ENDPOINT ====================
 
+CHAT_CREDIT_COST = 1   # credits per text message
+VOICE_CREDIT_COST = 2  # credits per voice message
+CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
+FREE_MESSAGE_LIMIT = 10  # free messages for unauthenticated users
+WELCOME_BONUS_CREDITS = 20  # free credits for new signups
+
+
+async def deduct_credits(user_id: str, amount: int) -> bool:
+    """Atomically deduct credits. Returns True if successful, False if insufficient."""
+    result = await db.users.update_one(
+        {"id": user_id, "credit_balance": {"$gte": amount}},
+        {"$inc": {"credit_balance": -amount}},
+    )
+    return result.modified_count > 0
+
+
+async def refund_credits(user_id: str, amount: int):
+    """Refund credits on failure."""
+    await db.users.update_one(
+        {"id": user_id},
+        {"$inc": {"credit_balance": amount}},
+    )
+
+
 @api_router.post("/chat")
 async def chat(request: ChatRequest):
     """Generate conversational AI response using Google Gemini"""
     try:
         logger.info(f"Chat request for conversation: {request.conversation_id}")
+
+        # Check credits / free message limit
+        user = await db.users.find_one({"id": request.user_id}) if request.user_id else None
+        is_authenticated = user is not None
+
+        if is_authenticated:
+            if not await deduct_credits(request.user_id, CHAT_CREDIT_COST):
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Insufficient credits. You need {CHAT_CREDIT_COST} credit(s) to send a message.",
+                )
+        else:
+            # Unauthenticated — enforce free message limit
+            total_messages = await db.messages.count_documents(
+                {"conversation_id": request.conversation_id, "role": "user"}
+            )
+            if total_messages >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+                )
 
         # Save user message to database
         user_msg = Message(
@@ -556,10 +631,11 @@ async def chat(request: ChatRequest):
         )
         await db.messages.insert_one(user_msg.model_dump())
 
-        # Get conversation history
+        # Get conversation history — cap to last CONTEXT_WINDOW messages for cost control
         messages = await db.messages.find(
             {"conversation_id": request.conversation_id}
-        ).sort("timestamp", 1).to_list(100)
+        ).sort("timestamp", -1).limit(CONTEXT_WINDOW + 1).to_list(CONTEXT_WINDOW + 1)
+        messages.reverse()  # back to chronological order
 
         # Build conversation history for Gemini
         system_message = """You are a helpful AI assistant that speaks Hausa language.
@@ -569,7 +645,7 @@ Do not introduce yourself or mention your name; answer directly."""
 
         gemini_client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'))
 
-        # Build history from previous messages (exclude the one we just saved)
+        # Build history from previous messages (exclude the current user message)
         history = []
         for msg in messages[:-1]:
             role = "user" if msg["role"] == "user" else "model"
@@ -583,32 +659,40 @@ Do not introduce yourself or mention your name; answer directly."""
             config=genai.types.GenerateContentConfig(system_instruction=system_message),
         )
         response = gemini_response.text
-        
+
         # Save assistant message to database
         assistant_message = Message(
             conversation_id=request.conversation_id,
             role="assistant",
             content=response
         )
-        
+
         await db.messages.insert_one(assistant_message.model_dump())
-        
+
         # Update conversation
         await db.conversations.update_one(
             {"id": request.conversation_id},
             {"$set": {"updated_at": datetime.now(timezone.utc)}}
         )
-        
+
         logger.info(f"Chat response generated: {response[:50]}...")
-        
+
+        remaining = user["credit_balance"] - CHAT_CREDIT_COST if is_authenticated else None
         return {
             "success": True,
             "response": response,
             "message_id": assistant_message.id,
-            "user_message_id": user_msg.id
+            "user_message_id": user_msg.id,
+            "credits_used": CHAT_CREDIT_COST if is_authenticated else 0,
+            "credit_balance": remaining,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
+        # Refund credits on failure
+        if is_authenticated:
+            await refund_credits(request.user_id, CHAT_CREDIT_COST)
         logger.error(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
@@ -726,7 +810,10 @@ async def signup_with_phone(request: PhoneSignupRequest):
         password_hash=hash_password(request.password),
     )
 
-    await db.users.insert_one(user.model_dump())
+    user_data = user.model_dump()
+    user_data["credit_balance"] = WELCOME_BONUS_CREDITS
+    await db.users.insert_one(user_data)
+    logger.info(f"New phone user {clean_phone[-4:]} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
 
     # Generate OTP for phone verification
     otp = generate_otp()
@@ -769,7 +856,10 @@ async def signup_with_email(request: EmailSignupRequest):
         password_hash=hash_password(request.password),
     )
 
-    await db.users.insert_one(user.model_dump())
+    user_data = user.model_dump()
+    user_data["credit_balance"] = WELCOME_BONUS_CREDITS
+    await db.users.insert_one(user_data)
+    logger.info(f"New email user {request.email.lower()} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
 
     # Generate email verification code
     code = generate_otp()
