@@ -469,7 +469,7 @@ async def transcribe_audio(
     conversation_id: str = File(...)
 ):
     """Transcribe Hausa audio using Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)"""
-    # Check credits for authenticated users
+    # Check credits / free message limit
     user = await db.users.find_one({"id": user_id}) if user_id else None
     is_authenticated = user is not None
     credits_deducted = False
@@ -481,6 +481,15 @@ async def transcribe_audio(
                 detail=f"Insufficient credits. You need {VOICE_CREDIT_COST} credits to send a voice message.",
             )
         credits_deducted = True
+    else:
+        total_messages = await db.messages.count_documents(
+            {"conversation_id": conversation_id, "role": "user"}
+        )
+        if total_messages >= FREE_MESSAGE_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+            )
 
     temp_path = None
     wav_path = None
@@ -566,6 +575,8 @@ async def transcribe_audio(
 CHAT_CREDIT_COST = 1   # credits per text message
 VOICE_CREDIT_COST = 2  # credits per voice message
 CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
+FREE_MESSAGE_LIMIT = 10  # free messages for unauthenticated users
+WELCOME_BONUS_CREDITS = 20  # free credits for new signups
 
 
 async def deduct_credits(user_id: str, amount: int) -> bool:
@@ -591,7 +602,7 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"Chat request for conversation: {request.conversation_id}")
 
-        # Check credits for authenticated users
+        # Check credits / free message limit
         user = await db.users.find_one({"id": request.user_id}) if request.user_id else None
         is_authenticated = user is not None
 
@@ -600,6 +611,16 @@ async def chat(request: ChatRequest):
                 raise HTTPException(
                     status_code=402,
                     detail=f"Insufficient credits. You need {CHAT_CREDIT_COST} credit(s) to send a message.",
+                )
+        else:
+            # Unauthenticated — enforce free message limit
+            total_messages = await db.messages.count_documents(
+                {"conversation_id": request.conversation_id, "role": "user"}
+            )
+            if total_messages >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
                 )
 
         # Save user message to database
@@ -789,7 +810,10 @@ async def signup_with_phone(request: PhoneSignupRequest):
         password_hash=hash_password(request.password),
     )
 
-    await db.users.insert_one(user.model_dump())
+    user_data = user.model_dump()
+    user_data["credit_balance"] = WELCOME_BONUS_CREDITS
+    await db.users.insert_one(user_data)
+    logger.info(f"New phone user {clean_phone[-4:]} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
 
     # Generate OTP for phone verification
     otp = generate_otp()
@@ -832,7 +856,10 @@ async def signup_with_email(request: EmailSignupRequest):
         password_hash=hash_password(request.password),
     )
 
-    await db.users.insert_one(user.model_dump())
+    user_data = user.model_dump()
+    user_data["credit_balance"] = WELCOME_BONUS_CREDITS
+    await db.users.insert_one(user_data)
+    logger.info(f"New email user {request.email.lower()} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
 
     # Generate email verification code
     code = generate_otp()

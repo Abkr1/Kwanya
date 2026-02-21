@@ -452,14 +452,27 @@ export default function KwanyaApp() {
       console.error('Transcription error:', error);
       const status = axiosErr.response?.status;
       if (status === 402) {
-        Alert.alert(
-          'Insufficient Credits',
-          axiosErr.response?.data?.detail || 'You need more credits to send voice messages.',
-          [
-            { text: 'Buy Credits', onPress: () => router.push('/credits') },
-            { text: 'OK', style: 'cancel' },
-          ],
-        );
+        const detail = axiosErr.response?.data?.detail || '';
+        if (!isAuthenticated || detail.includes('Sign up')) {
+          Alert.alert(
+            'Free Messages Used',
+            'Sign up to get 20 free credits and continue chatting!',
+            [
+              { text: 'Sign Up', onPress: () => router.push('/auth/signup') },
+              { text: 'Sign In', onPress: () => router.push('/auth/signin') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(
+            'Insufficient Credits',
+            detail || 'You need more credits to send voice messages.',
+            [
+              { text: 'Buy Credits', onPress: () => router.push('/credits') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        }
       } else {
         let msg = axiosErr.response?.data?.detail || 'Failed to transcribe audio';
         if (status === 520 || status === 522 || status === 524) {
@@ -560,14 +573,27 @@ export default function KwanyaApp() {
       }
       console.error('Chat error:', error);
       if (axiosErr.response?.status === 402) {
-        Alert.alert(
-          'Insufficient Credits',
-          axiosErr.response?.data?.detail || 'You need more credits to continue chatting.',
-          [
-            { text: 'Buy Credits', onPress: () => router.push('/credits') },
-            { text: 'OK', style: 'cancel' },
-          ],
-        );
+        const detail = axiosErr.response?.data?.detail || '';
+        if (!isAuthenticated || detail.includes('Sign up')) {
+          Alert.alert(
+            'Free Messages Used',
+            'Sign up to get 20 free credits and continue chatting!',
+            [
+              { text: 'Sign Up', onPress: () => router.push('/auth/signup') },
+              { text: 'Sign In', onPress: () => router.push('/auth/signin') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(
+            'Insufficient Credits',
+            detail || 'You need more credits to continue chatting.',
+            [
+              { text: 'Buy Credits', onPress: () => router.push('/credits') },
+              { text: 'OK', style: 'cancel' },
+            ],
+          );
+        }
       } else {
         Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to get response');
       }
