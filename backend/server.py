@@ -460,6 +460,62 @@ async def send_sms_otp(phone: str, otp: str) -> bool:
         return False
 
 
+@api_router.get("/debug/test-sms/{phone}")
+async def debug_test_sms(phone: str):
+    """Debug endpoint: test all Termii SMS channels and return raw responses."""
+    clean_phone = phone.lstrip("+")
+    if clean_phone.startswith("0"):
+        clean_phone = "234" + clean_phone[1:]
+
+    results = {}
+    async with httpx.AsyncClient(timeout=15) as http:
+        # Test WhatsApp OTP
+        try:
+            wa_resp = await http.post("https://api.ng.termii.com/api/sms/send", json={
+                "to": clean_phone, "from": TERMII_SENDER_ID,
+                "sms": "Kwanya test: WhatsApp OTP channel", "type": "plain",
+                "channel": "whatsapp_otp", "api_key": TERMII_API_KEY,
+            })
+            results["1_whatsapp_otp"] = {"status": wa_resp.status_code, "body": wa_resp.json()}
+        except Exception as e:
+            results["1_whatsapp_otp"] = {"error": str(e)}
+
+        # Test Kwanya sender ID generic
+        try:
+            sender_resp = await http.post("https://api.ng.termii.com/api/sms/send", json={
+                "to": clean_phone, "from": TERMII_SENDER_ID,
+                "sms": "Kwanya test: Sender ID generic channel", "type": "plain",
+                "channel": "generic", "api_key": TERMII_API_KEY,
+            })
+            results["2_sender_id_generic"] = {"status": sender_resp.status_code, "body": sender_resp.json()}
+        except Exception as e:
+            results["2_sender_id_generic"] = {"error": str(e)}
+
+        # Test Number API
+        try:
+            num_resp = await http.post("https://api.ng.termii.com/api/sms/number/send", json={
+                "to": clean_phone,
+                "sms": "Kwanya test: Number API channel",
+                "api_key": TERMII_API_KEY,
+            })
+            results["3_number_api"] = {"status": num_resp.status_code, "body": num_resp.json()}
+        except Exception as e:
+            results["3_number_api"] = {"error": str(e)}
+
+        # Test DND channel
+        try:
+            dnd_resp = await http.post("https://api.ng.termii.com/api/sms/send", json={
+                "to": clean_phone, "from": TERMII_SENDER_ID,
+                "sms": "Kwanya test: DND channel", "type": "plain",
+                "channel": "dnd", "api_key": TERMII_API_KEY,
+            })
+            results["4_dnd_channel"] = {"status": dnd_resp.status_code, "body": dnd_resp.json()}
+        except Exception as e:
+            results["4_dnd_channel"] = {"error": str(e)}
+
+    return {"phone_sent_to": clean_phone, "sender_id": TERMII_SENDER_ID, "results": results}
+
+
 async def send_verification_email(email: str, code: str) -> bool:
     """Send verification code via Termii Email Token API. Returns True on success."""
     if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
