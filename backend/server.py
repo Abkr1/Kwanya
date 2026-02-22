@@ -478,7 +478,7 @@ async def transcribe_audio(
         if not await deduct_credits(user_id, VOICE_CREDIT_COST):
             raise HTTPException(
                 status_code=402,
-                detail=f"Insufficient credits. You need {VOICE_CREDIT_COST} credits to send a voice message.",
+                detail="Insufficient credits. Please top up to continue.",
             )
         credits_deducted = True
     else:
@@ -617,7 +617,7 @@ async def chat(request: ChatRequest):
             if not await deduct_credits(request.user_id, CHAT_CREDIT_COST):
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Insufficient credits. You need {CHAT_CREDIT_COST} credit(s) to send a message.",
+                    detail="Insufficient credits. Please top up to continue.",
                 )
         else:
             # Unauthenticated — enforce free message limit across ALL conversations
