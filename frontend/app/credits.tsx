@@ -466,7 +466,7 @@ export default function CreditsScreen() {
               />
             </View>
             <Text style={styles.balanceHint}>
-              {balance === 0 ? 'No credits remaining' : balance < 50 ? 'Running low' : 'Credits available'}
+              {balance === 0 ? 'No credits remaining' : balance < 30 ? 'Running low' : 'Credits available'}
             </Text>
           </View>
 
