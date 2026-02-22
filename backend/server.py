@@ -579,11 +579,11 @@ async def transcribe_audio(
 
 # ==================== CHAT ENDPOINT ====================
 
-CHAT_CREDIT_COST = 3   # credits (₦3) per text message
-VOICE_CREDIT_COST = 3  # credits (₦3) per voice message
+CHAT_CREDIT_COST = 7   # credits (₦7) per text message
+VOICE_CREDIT_COST = 7  # credits (₦7) per voice message
 CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
 FREE_MESSAGE_LIMIT = 3   # free messages for unauthenticated users
-WELCOME_BONUS_CREDITS = 9  # 3 free messages × ₦3 per message
+WELCOME_BONUS_CREDITS = 21  # 3 free messages × ₦7 per message
 
 
 async def deduct_credits(user_id: str, amount: int) -> bool:
