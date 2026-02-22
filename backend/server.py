@@ -514,25 +514,35 @@ async def debug_test_sms(phone: str):
 @api_router.post("/debug/migrate-phones")
 async def migrate_phone_numbers():
     """One-time migration: convert all +234/234 phone numbers to 0-prefix local format."""
-    updated = 0
-    async for user in db.users.find({"phone": {"$exists": True}}, {"_id": 0, "id": 1, "phone": 1}):
-        old_phone = user.get("phone", "")
-        new_phone = normalize_phone(old_phone)
-        if old_phone != new_phone:
-            await db.users.update_one({"id": user["id"]}, {"$set": {"phone": new_phone}})
-            updated += 1
-            logger.info(f"Migrated phone: {old_phone} → {new_phone}")
+    try:
+        updated = 0
+        users = await db.users.find({"phone": {"$exists": True}}, {"_id": 0, "id": 1, "phone": 1}).to_list(None)
+        for user in users:
+            old_phone = user.get("phone", "")
+            if not old_phone:
+                continue
+            new_phone = normalize_phone(old_phone)
+            if old_phone != new_phone:
+                await db.users.update_one({"id": user["id"]}, {"$set": {"phone": new_phone}})
+                updated += 1
+                logger.info(f"Migrated phone: {old_phone} → {new_phone}")
 
-    # Also migrate OTP records
-    otp_updated = 0
-    async for otp in db.otps.find({"phone": {"$exists": True}}):
-        old_phone = otp.get("phone", "")
-        new_phone = normalize_phone(old_phone)
-        if old_phone != new_phone:
-            await db.otps.update_one({"_id": otp["_id"]}, {"$set": {"phone": new_phone}})
-            otp_updated += 1
+        # Also migrate OTP records
+        otp_updated = 0
+        otps = await db.otps.find({"phone": {"$exists": True}}).to_list(None)
+        for otp in otps:
+            old_phone = otp.get("phone", "")
+            if not old_phone:
+                continue
+            new_phone = normalize_phone(old_phone)
+            if old_phone != new_phone:
+                await db.otps.update_one({"_id": otp["_id"]}, {"$set": {"phone": new_phone}})
+                otp_updated += 1
 
-    return {"success": True, "users_updated": updated, "otps_updated": otp_updated}
+        return {"success": True, "users_updated": updated, "otps_updated": otp_updated}
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        return {"success": False, "error": str(e)}
 
 
 async def send_verification_email(email: str, code: str) -> bool:
