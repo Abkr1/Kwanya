@@ -390,11 +390,12 @@ def generate_otp() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
 
-async def send_sms_otp(phone: str, otp: str) -> bool:
-    """Send OTP via Termii. Tries WhatsApp OTP first, then Number API as fallback."""
+async def send_sms_otp(phone: str) -> Optional[str]:
+    """Send OTP via Termii Token API. Termii generates and delivers the PIN.
+    Returns the pinId on success (needed for verification), or None on failure."""
     if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
-        logger.warning(f"Termii not configured — OTP for {phone[-4:]}: {otp}")
-        return False
+        logger.warning(f"Termii not configured — cannot send OTP to {phone[-4:]}")
+        return None
 
     # Ensure phone is in international format without '+' (e.g. 2347012345678)
     clean_phone = phone.lstrip("+")
@@ -403,117 +404,80 @@ async def send_sms_otp(phone: str, otp: str) -> bool:
 
     try:
         async with httpx.AsyncClient(timeout=15) as http:
-            # 1. Try WhatsApp OTP channel first
-            wa_payload = {
-                "to": clean_phone,
-                "from": TERMII_SENDER_ID,
-                "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
-                "type": "plain",
-                "channel": "whatsapp_otp",
+            payload = {
                 "api_key": TERMII_API_KEY,
+                "message_type": "NUMERIC",
+                "to": clean_phone,
+                "from": "N-Alert",
+                "channel": "dnd",
+                "pin_attempts": 3,
+                "pin_time_to_live": 5,
+                "pin_length": 6,
+                "pin_placeholder": "< 1234 >",
+                "message_text": "Your Kwanya verification code is < 1234 >. It expires in 5 minutes.",
+                "pin_type": "NUMERIC",
             }
-            resp = await http.post("https://api.ng.termii.com/api/sms/send", json=wa_payload)
+            resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json=payload)
             data = resp.json()
-            logger.info(f"Termii WhatsApp OTP response for {clean_phone[-4:]}: status={resp.status_code} body={data}")
+            logger.info(f"Termii Token API response for {clean_phone[-4:]}: status={resp.status_code} body={data}")
 
-            if resp.status_code == 200 and data.get("message_id"):
-                logger.info(f"WhatsApp OTP sent to {clean_phone[-4:]} (message_id={data['message_id']})")
-                return True
+            if resp.status_code == 200 and data.get("pinId"):
+                logger.info(f"OTP sent to {clean_phone[-4:]} (pinId={data['pinId']})")
+                return data["pinId"]
 
-            # 2. Fallback to Kwanya sender ID on generic channel
-            logger.warning(f"WhatsApp OTP failed for {clean_phone[-4:]}, falling back to Kwanya sender ID")
-            sender_payload = {
-                "to": clean_phone,
-                "from": TERMII_SENDER_ID,
-                "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
-                "type": "plain",
-                "channel": "generic",
-                "api_key": TERMII_API_KEY,
-            }
-            resp2 = await http.post("https://api.ng.termii.com/api/sms/send", json=sender_payload)
-            data2 = resp2.json()
-            logger.info(f"Termii Sender ID response for {clean_phone[-4:]}: status={resp2.status_code} body={data2}")
-
-            if resp2.status_code == 200 and data2.get("message_id"):
-                logger.info(f"SMS OTP sent via Sender ID to {clean_phone[-4:]} (message_id={data2['message_id']})")
-                return True
-
-            # 3. Fallback to Number API (SMS via auto-generated number)
-            logger.warning(f"Sender ID failed for {clean_phone[-4:]}, falling back to Number API")
-            number_payload = {
-                "to": clean_phone,
-                "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
-                "api_key": TERMII_API_KEY,
-            }
-            resp3 = await http.post("https://api.ng.termii.com/api/sms/number/send", json=number_payload)
-            data3 = resp3.json()
-            logger.info(f"Termii Number API response for {clean_phone[-4:]}: status={resp3.status_code} body={data3}")
-
-            if resp3.status_code == 200 and data3.get("message_id"):
-                logger.info(f"SMS OTP sent via Number API to {clean_phone[-4:]} (message_id={data3['message_id']})")
-                return True
-
-            logger.error(f"All Termii channels failed for {clean_phone[-4:]}: {data3}")
-            return False
+            logger.error(f"Termii Token API failed for {clean_phone[-4:]}: {data}")
+            return None
     except Exception as e:
         logger.error(f"Termii OTP failed for {phone[-4:]}: {e}")
+        return None
+
+
+async def verify_sms_otp_via_termii(pin_id: str, otp: str) -> bool:
+    """Verify OTP via Termii's verify endpoint. Returns True if valid."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.post("https://api.ng.termii.com/api/sms/otp/verify", json={
+                "api_key": TERMII_API_KEY,
+                "pin_id": pin_id,
+                "pin": otp,
+            })
+            data = resp.json()
+            logger.info(f"Termii verify response: status={resp.status_code} body={data}")
+            return resp.status_code == 200 and data.get("verified") == True
+    except Exception as e:
+        logger.error(f"Termii verify failed: {e}")
         return False
 
 
 @api_router.get("/debug/test-sms/{phone}")
 async def debug_test_sms(phone: str):
-    """Debug endpoint: test all Termii SMS channels and return raw responses."""
+    """Debug endpoint: test Termii Token OTP API and return raw response."""
     clean_phone = phone.lstrip("+")
     if clean_phone.startswith("0"):
         clean_phone = "234" + clean_phone[1:]
 
     results = {}
     async with httpx.AsyncClient(timeout=15) as http:
-        # Test WhatsApp OTP
+        # Test Token OTP API (the one we actually use)
         try:
-            wa_resp = await http.post("https://api.ng.termii.com/api/sms/send", json={
-                "to": clean_phone, "from": TERMII_SENDER_ID,
-                "sms": "Kwanya test: WhatsApp OTP channel", "type": "plain",
-                "channel": "whatsapp_otp", "api_key": TERMII_API_KEY,
-            })
-            results["1_whatsapp_otp"] = {"status": wa_resp.status_code, "body": wa_resp.json()}
-        except Exception as e:
-            results["1_whatsapp_otp"] = {"error": str(e)}
-
-        # Test Kwanya sender ID generic
-        try:
-            sender_resp = await http.post("https://api.ng.termii.com/api/sms/send", json={
-                "to": clean_phone, "from": TERMII_SENDER_ID,
-                "sms": "Kwanya test: Sender ID generic channel", "type": "plain",
-                "channel": "generic", "api_key": TERMII_API_KEY,
-            })
-            results["2_sender_id_generic"] = {"status": sender_resp.status_code, "body": sender_resp.json()}
-        except Exception as e:
-            results["2_sender_id_generic"] = {"error": str(e)}
-
-        # Test Number API
-        try:
-            num_resp = await http.post("https://api.ng.termii.com/api/sms/number/send", json={
-                "to": clean_phone,
-                "sms": "Kwanya test: Number API channel",
+            token_resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json={
                 "api_key": TERMII_API_KEY,
+                "message_type": "NUMERIC",
+                "to": clean_phone,
+                "from": "N-Alert",
+                "channel": "dnd",
+                "pin_attempts": 3,
+                "pin_time_to_live": 5,
+                "pin_length": 6,
+                "pin_placeholder": "< 1234 >",
+                "message_text": "Kwanya test code: < 1234 >",
+                "pin_type": "NUMERIC",
             })
-            results["3_number_api"] = {"status": num_resp.status_code, "body": num_resp.json()}
+            results["token_otp_api"] = {"status": token_resp.status_code, "body": token_resp.json()}
         except Exception as e:
-            results["3_number_api"] = {"error": str(e)}
+            results["token_otp_api"] = {"error": str(e)}
 
-        # Test DND channel
-        try:
-            dnd_resp = await http.post("https://api.ng.termii.com/api/sms/send", json={
-                "to": clean_phone, "from": TERMII_SENDER_ID,
-                "sms": "Kwanya test: DND channel", "type": "plain",
-                "channel": "dnd", "api_key": TERMII_API_KEY,
-            })
-            results["4_dnd_channel"] = {"status": dnd_resp.status_code, "body": dnd_resp.json()}
-        except Exception as e:
-            results["4_dnd_channel"] = {"error": str(e)}
-
-    return {"phone_sent_to": clean_phone, "sender_id": TERMII_SENDER_ID, "results": results}
+    return {"phone_sent_to": clean_phone, "results": results}
 
 
 async def send_verification_email(email: str, code: str) -> bool:
@@ -923,18 +887,21 @@ async def signup_with_phone(request: PhoneSignupRequest):
     await db.users.insert_one(user_data)
     logger.info(f"New phone user {clean_phone[-4:]} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
 
-    # Generate OTP for phone verification
-    otp = generate_otp()
-    await db.otps.insert_one({
-        "phone": clean_phone,
-        "otp": otp,
-        "created_at": datetime.now(timezone.utc),
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
-    })
+    # Send OTP via Termii Token API (Termii generates the PIN)
+    pin_id = await send_sms_otp(clean_phone)
+    sms_sent = pin_id is not None
 
-    # Send OTP via SMS
-    sms_sent = await send_sms_otp(clean_phone, otp)
-    logger.info(f"OTP generated for {clean_phone[-4:]} (sent={sms_sent})")
+    if pin_id:
+        # Store pinId for verification later
+        await db.otps.delete_many({"phone": clean_phone})
+        await db.otps.insert_one({
+            "phone": clean_phone,
+            "pin_id": pin_id,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        })
+
+    logger.info(f"OTP for {clean_phone[-4:]} (sent={sms_sent})")
 
     token = create_token(user.id)
 
@@ -1110,16 +1077,20 @@ async def signin_with_google(request: GoogleSigninRequest):
 
 @auth_router.post("/verify-otp")
 async def verify_otp(request: VerifyOTPRequest):
-    """Verify phone OTP code"""
+    """Verify phone OTP code via Termii"""
     clean_phone = re.sub(r'[^\d+]', '', request.phone)
 
     otp_record = await db.otps.find_one({
         "phone": clean_phone,
-        "otp": request.otp,
         "expires_at": {"$gt": datetime.now(timezone.utc)},
     })
 
-    if not otp_record:
+    if not otp_record or not otp_record.get("pin_id"):
+        raise HTTPException(status_code=400, detail="No pending OTP found. Please request a new one.")
+
+    # Verify via Termii
+    verified = await verify_sms_otp_via_termii(otp_record["pin_id"], request.otp)
+    if not verified:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     # Mark phone as verified
@@ -1172,18 +1143,19 @@ async def resend_otp(request: ResendOTPRequest):
     if user.get("is_phone_verified"):
         raise HTTPException(status_code=400, detail="Phone already verified")
 
-    # Delete old OTPs and create new one
-    await db.otps.delete_many({"phone": clean_phone})
-    otp = generate_otp()
-    await db.otps.insert_one({
-        "phone": clean_phone,
-        "otp": otp,
-        "created_at": datetime.now(timezone.utc),
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
-    })
+    # Send new OTP via Termii Token API
+    pin_id = await send_sms_otp(clean_phone)
+    sms_sent = pin_id is not None
 
-    # Send OTP via SMS
-    sms_sent = await send_sms_otp(clean_phone, otp)
+    if pin_id:
+        await db.otps.delete_many({"phone": clean_phone})
+        await db.otps.insert_one({
+            "phone": clean_phone,
+            "pin_id": pin_id,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        })
+
     logger.info(f"OTP resent for {clean_phone[-4:]} (sent={sms_sent})")
 
     return {"success": True, "message": "OTP resent", "otp_sent": sms_sent}
