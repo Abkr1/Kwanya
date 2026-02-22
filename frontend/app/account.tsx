@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,13 +28,16 @@ export default function AccountScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user?.display_name || '');
   const [isSaving, setIsSaving] = useState(false);
+  const inputRef = useRef<TextInput>(null);
 
-  // Reset editing state when navigating away and back
+  // Reset editing state when screen loses focus
   useFocusEffect(
     useCallback(() => {
       return () => {
         setIsEditing(false);
         setEditName(user?.display_name || '');
+        inputRef.current?.blur();
+        Keyboard.dismiss();
       };
     }, [user?.display_name]),
   );
@@ -536,12 +540,12 @@ export default function AccountScreen() {
             <View style={styles.editCard}>
               <Text style={styles.editLabel}>Display Name</Text>
               <TextInput
+                ref={inputRef}
                 style={styles.editInput}
                 value={editName}
                 onChangeText={setEditName}
                 placeholder="Your name"
                 placeholderTextColor={palette.textSubtle}
-                autoFocus
               />
               <View style={styles.editButtons}>
                 <TouchableOpacity
