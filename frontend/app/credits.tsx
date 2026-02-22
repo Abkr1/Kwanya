@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
@@ -77,6 +78,18 @@ export default function CreditsScreen() {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (checkoutUrl) {
+        setCheckoutUrl(null);
+      } else {
+        router.replace({ pathname: '/', params: { sidebar: '1' } });
+      }
+      return true;
+    });
+    return () => handler.remove();
+  }, [checkoutUrl, router]);
 
   const startPolling = useCallback(
     (paymentRef: string) => {
@@ -475,7 +488,7 @@ export default function CreditsScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.balanceLabel}>Show Balance</Text>
+                <Text style={styles.balanceLabel}>Balance</Text>
                 <View style={styles.barTrack}>
                   <View
                     style={[
