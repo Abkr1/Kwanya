@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
 
@@ -24,6 +25,16 @@ export default function AccountScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user?.display_name || '');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Reset editing state when navigating away and back
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setIsEditing(false);
+        setEditName(user?.display_name || '');
+      };
+    }, [user?.display_name]),
+  );
 
   const handleSignOut = () => {
     Alert.alert(
