@@ -475,7 +475,7 @@ export default function CreditsScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.balanceLabel}>Show Balance</Text>
+                <Text style={styles.balanceLabel}>Balance</Text>
                 <View style={styles.barTrack}>
                   <View
                     style={[
