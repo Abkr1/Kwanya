@@ -408,7 +408,7 @@ async def send_sms_otp(phone: str, otp: str) -> bool:
                 "from": TERMII_SENDER_ID,
                 "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
                 "type": "plain",
-                "channel": "dnd",
+                "channel": "generic",
                 "api_key": TERMII_API_KEY,
             }
             resp = await http.post("https://api.ng.termii.com/api/sms/send", json=payload)
