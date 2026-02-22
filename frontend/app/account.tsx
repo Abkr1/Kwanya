@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +42,14 @@ export default function AccountScreen() {
       };
     }, [user?.display_name]),
   );
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      router.replace({ pathname: '/', params: { sidebar: '1' } });
+      return true;
+    });
+    return () => handler.remove();
+  }, [router]);
 
   const handleSignOut = () => {
     Alert.alert(

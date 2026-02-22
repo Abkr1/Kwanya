@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -323,13 +324,21 @@ export default function SettingsScreen() {
     [palette, insets],
   );
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     if (section !== 'menu') {
       setSection('menu');
     } else {
       router.replace({ pathname: '/', params: { sidebar: '1' } });
     }
-  };
+  }, [section, router]);
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBack();
+      return true;
+    });
+    return () => handler.remove();
+  }, [handleBack]);
 
   const handleLogout = () => {
     Alert.alert(
