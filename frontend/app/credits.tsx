@@ -179,30 +179,38 @@ export default function CreditsScreen() {
         },
         scrollContent: { flex: 1 },
         balanceCard: {
-          margin: 20,
-          padding: 24,
+          marginHorizontal: 20,
+          marginTop: 20,
+          marginBottom: 12,
+          padding: 16,
           backgroundColor: palette.surface,
-          borderRadius: 16,
+          borderRadius: 14,
           borderWidth: 1,
           borderColor: palette.border,
-          alignItems: 'center',
         },
         balanceLabel: {
-          fontSize: 14,
+          fontSize: 13,
           color: palette.textSubtle,
-          marginBottom: 8,
+          marginBottom: 10,
           textTransform: 'uppercase',
           letterSpacing: 0.5,
+          fontWeight: '600',
         },
-        balanceValue: {
-          fontSize: 40,
-          fontWeight: '800',
-          color: palette.text,
+        barTrack: {
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: palette.border,
+          overflow: 'hidden',
         },
-        balanceUnit: {
-          fontSize: 14,
+        barFill: {
+          height: '100%',
+          borderRadius: 4,
+          backgroundColor: palette.button,
+        },
+        balanceHint: {
+          fontSize: 12,
           color: palette.textMuted,
-          marginTop: 4,
+          marginTop: 8,
         },
         section: { paddingHorizontal: 20, marginBottom: 24 },
         sectionTitle: {
@@ -446,11 +454,20 @@ export default function CreditsScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Balance Card */}
+          {/* Balance Bar */}
           <View style={styles.balanceCard}>
             <Text style={styles.balanceLabel}>Your Balance</Text>
-            <Text style={styles.balanceValue}>{balance.toLocaleString()}</Text>
-            <Text style={styles.balanceUnit}>credits</Text>
+            <View style={styles.barTrack}>
+              <View
+                style={[
+                  styles.barFill,
+                  { width: `${Math.min(100, Math.max(2, (balance / Math.max(balance, 500)) * 100))}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.balanceHint}>
+              {balance === 0 ? 'No credits remaining' : balance < 50 ? 'Running low' : 'Credits available'}
+            </Text>
           </View>
 
           {/* Preset Packs */}
