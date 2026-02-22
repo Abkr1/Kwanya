@@ -379,6 +379,25 @@ async def get_current_user(authorization: Optional[str] = None):
         return None
 
 
+def normalize_phone(phone: str) -> str:
+    """Normalize phone to local format: 0XXXXXXXXXX.
+    Converts +234..., 234... to 0... format."""
+    digits = re.sub(r'[^\d]', '', phone.lstrip("+"))
+    if digits.startswith("234") and len(digits) > 10:
+        digits = "0" + digits[3:]
+    if not digits.startswith("0"):
+        digits = "0" + digits
+    return digits
+
+
+def phone_to_international(phone: str) -> str:
+    """Convert local phone (0XXXXXXXXXX) to international format (234XXXXXXXXXX) for Termii."""
+    digits = re.sub(r'[^\d]', '', phone)
+    if digits.startswith("0"):
+        digits = "234" + digits[1:]
+    return digits
+
+
 def generate_email_from_phone(phone: str) -> str:
     """Generate an email address from phone number using trulib.com domain"""
     clean_phone = re.sub(r'[^\d]', '', phone)
@@ -390,37 +409,140 @@ def generate_otp() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
 
-async def send_sms_otp(phone: str, otp: str) -> bool:
-    """Send OTP via Termii SMS API using DND channel. Returns True on success."""
+async def send_sms_otp(phone: str) -> Optional[str]:
+    """Send OTP via Termii Token API. Termii generates and delivers the PIN.
+    Returns the pinId on success (needed for verification), or None on failure."""
     if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
-        logger.warning(f"Termii not configured — OTP for {phone[-4:]}: {otp}")
-        return False
+        logger.warning(f"Termii not configured — cannot send OTP to {phone[-4:]}")
+        return None
 
-    # Ensure phone is in international format without '+' (e.g. 2347012345678)
-    clean_phone = phone.lstrip("+")
-    if clean_phone.startswith("0"):
-        clean_phone = "234" + clean_phone[1:]
+    # Convert to international format for Termii API
+    clean_phone = phone_to_international(phone)
+
+    # Try each sender ID until one works
+    sender_options = [
+        {"from": TERMII_SENDER_ID, "channel": "generic"},
+        {"from": TERMII_SENDER_ID, "channel": "dnd"},
+    ]
 
     try:
         async with httpx.AsyncClient(timeout=15) as http:
-            payload = {
-                "to": clean_phone,
-                "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
-                "api_key": TERMII_API_KEY,
-            }
-            resp = await http.post("https://api.ng.termii.com/api/sms/number/send", json=payload)
-            data = resp.json()
-            logger.info(f"Termii Number API response for {clean_phone[-4:]}: status={resp.status_code} body={data}")
+            for option in sender_options:
+                payload = {
+                    "api_key": TERMII_API_KEY,
+                    "message_type": "NUMERIC",
+                    "to": clean_phone,
+                    "from": option["from"],
+                    "channel": option["channel"],
+                    "pin_attempts": 3,
+                    "pin_time_to_live": 5,
+                    "pin_length": 6,
+                    "pin_placeholder": "< 1234 >",
+                    "message_text": "Your Kwanya verification code is < 1234 >. It expires in 5 minutes.",
+                    "pin_type": "NUMERIC",
+                }
+                resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json=payload)
+                data = resp.json()
+                logger.info(f"Termii Token API ({option['from']}/{option['channel']}) for {clean_phone[-4:]}: status={resp.status_code} body={data}")
 
-            if resp.status_code == 200 and data.get("message_id"):
-                logger.info(f"SMS OTP sent via Number API to {clean_phone[-4:]} (message_id={data['message_id']})")
-                return True
+                if resp.status_code == 200 and data.get("pinId"):
+                    logger.info(f"OTP sent to {clean_phone[-4:]} via {option['from']}/{option['channel']} (pinId={data['pinId']})")
+                    return data["pinId"]
 
-            logger.error(f"Termii Number API failed for {clean_phone[-4:]}: {data}")
-            return False
+                logger.warning(f"Termii {option['from']}/{option['channel']} failed for {clean_phone[-4:]}")
+
+            logger.error(f"All Termii channels failed for {clean_phone[-4:]}")
+            return None
     except Exception as e:
-        logger.error(f"Termii SMS failed for {phone[-4:]}: {e}")
+        logger.error(f"Termii OTP failed for {phone[-4:]}: {e}")
+        return None
+
+
+async def verify_sms_otp_via_termii(pin_id: str, otp: str) -> bool:
+    """Verify OTP via Termii's verify endpoint. Returns True if valid."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.post("https://api.ng.termii.com/api/sms/otp/verify", json={
+                "api_key": TERMII_API_KEY,
+                "pin_id": pin_id,
+                "pin": otp,
+            })
+            data = resp.json()
+            logger.info(f"Termii verify response: status={resp.status_code} body={data}")
+            return resp.status_code == 200 and data.get("verified") == True
+    except Exception as e:
+        logger.error(f"Termii verify failed: {e}")
         return False
+
+
+@api_router.get("/debug/test-sms/{phone}")
+async def debug_test_sms(phone: str):
+    """Debug endpoint: list sender IDs and test Token OTP API with Termii default."""
+    clean_phone = phone_to_international(phone)
+
+    results = {}
+    async with httpx.AsyncClient(timeout=15) as http:
+        # 1. List all sender IDs on account
+        try:
+            sid_resp = await http.get(f"https://api.ng.termii.com/api/sender-id?api_key={TERMII_API_KEY}")
+            results["sender_ids"] = {"status": sid_resp.status_code, "body": sid_resp.json()}
+        except Exception as e:
+            results["sender_ids"] = {"error": str(e)}
+
+        # 2. Test Token OTP with "Termii" as sender (Termii's own default)
+        try:
+            token_resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json={
+                "api_key": TERMII_API_KEY,
+                "message_type": "NUMERIC",
+                "to": clean_phone,
+                "from": "Termii",
+                "channel": "generic",
+                "pin_attempts": 3,
+                "pin_time_to_live": 5,
+                "pin_length": 6,
+                "pin_placeholder": "< 1234 >",
+                "message_text": "Your Kwanya code is < 1234 >",
+                "pin_type": "NUMERIC",
+            })
+            results["token_otp_termii_sender"] = {"status": token_resp.status_code, "body": token_resp.json()}
+        except Exception as e:
+            results["token_otp_termii_sender"] = {"error": str(e)}
+
+    return {"phone_sent_to": clean_phone, "results": results}
+
+
+@api_router.post("/debug/migrate-phones")
+async def migrate_phone_numbers():
+    """One-time migration: convert all +234/234 phone numbers to 0-prefix local format."""
+    try:
+        updated = 0
+        users = await db.users.find({"phone": {"$exists": True}}, {"_id": 0, "id": 1, "phone": 1}).to_list(None)
+        for user in users:
+            old_phone = user.get("phone", "")
+            if not old_phone:
+                continue
+            new_phone = normalize_phone(old_phone)
+            if old_phone != new_phone:
+                await db.users.update_one({"id": user["id"]}, {"$set": {"phone": new_phone}})
+                updated += 1
+                logger.info(f"Migrated phone: {old_phone} → {new_phone}")
+
+        # Also migrate OTP records
+        otp_updated = 0
+        otps = await db.otps.find({"phone": {"$exists": True}}).to_list(None)
+        for otp in otps:
+            old_phone = otp.get("phone", "")
+            if not old_phone:
+                continue
+            new_phone = normalize_phone(old_phone)
+            if old_phone != new_phone:
+                await db.otps.update_one({"_id": otp["_id"]}, {"$set": {"phone": new_phone}})
+                otp_updated += 1
+
+        return {"success": True, "users_updated": updated, "otps_updated": otp_updated}
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        return {"success": False, "error": str(e)}
 
 
 async def send_verification_email(email: str, code: str) -> bool:
@@ -802,7 +924,7 @@ auth_router = APIRouter(prefix="/api/auth", dependencies=[Depends(check_auth_rat
 async def signup_with_phone(request: PhoneSignupRequest):
     """Sign up with phone number - auto-generates email at trulib.com"""
     # Validate phone format (basic check)
-    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    clean_phone = normalize_phone(request.phone)
     if len(clean_phone) < 10:
         raise HTTPException(status_code=400, detail="Invalid phone number")
 
@@ -830,18 +952,21 @@ async def signup_with_phone(request: PhoneSignupRequest):
     await db.users.insert_one(user_data)
     logger.info(f"New phone user {clean_phone[-4:]} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
 
-    # Generate OTP for phone verification
-    otp = generate_otp()
-    await db.otps.insert_one({
-        "phone": clean_phone,
-        "otp": otp,
-        "created_at": datetime.now(timezone.utc),
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
-    })
+    # Send OTP via Termii Token API (Termii generates the PIN)
+    pin_id = await send_sms_otp(clean_phone)
+    sms_sent = pin_id is not None
 
-    # Send OTP via SMS
-    sms_sent = await send_sms_otp(clean_phone, otp)
-    logger.info(f"OTP generated for {clean_phone[-4:]} (sent={sms_sent})")
+    if pin_id:
+        # Store pinId for verification later
+        await db.otps.delete_many({"phone": clean_phone})
+        await db.otps.insert_one({
+            "phone": clean_phone,
+            "pin_id": pin_id,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        })
+
+    logger.info(f"OTP for {clean_phone[-4:]} (sent={sms_sent})")
 
     token = create_token(user.id)
 
@@ -955,9 +1080,12 @@ async def signin(request: SigninRequest):
     """Sign in with phone or email + password"""
     identifier = request.identifier.strip()
 
+    # Normalize phone for lookup (handles +234, 234, 0 formats)
+    normalized_phone = normalize_phone(identifier) if any(c.isdigit() for c in identifier) and "@" not in identifier else identifier
+
     user = await db.users.find_one({
         "$or": [
-            {"phone": identifier},
+            {"phone": normalized_phone},
             {"email": identifier.lower()},
         ]
     })
@@ -1017,16 +1145,20 @@ async def signin_with_google(request: GoogleSigninRequest):
 
 @auth_router.post("/verify-otp")
 async def verify_otp(request: VerifyOTPRequest):
-    """Verify phone OTP code"""
-    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    """Verify phone OTP code via Termii"""
+    clean_phone = normalize_phone(request.phone)
 
     otp_record = await db.otps.find_one({
         "phone": clean_phone,
-        "otp": request.otp,
         "expires_at": {"$gt": datetime.now(timezone.utc)},
     })
 
-    if not otp_record:
+    if not otp_record or not otp_record.get("pin_id"):
+        raise HTTPException(status_code=400, detail="No pending OTP found. Please request a new one.")
+
+    # Verify via Termii
+    verified = await verify_sms_otp_via_termii(otp_record["pin_id"], request.otp)
+    if not verified:
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     # Mark phone as verified
@@ -1070,7 +1202,7 @@ async def verify_email(request: VerifyEmailCodeRequest):
 @auth_router.post("/resend-otp")
 async def resend_otp(request: ResendOTPRequest):
     """Resend phone OTP"""
-    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    clean_phone = normalize_phone(request.phone)
 
     user = await db.users.find_one({"phone": clean_phone})
     if not user:
@@ -1079,18 +1211,19 @@ async def resend_otp(request: ResendOTPRequest):
     if user.get("is_phone_verified"):
         raise HTTPException(status_code=400, detail="Phone already verified")
 
-    # Delete old OTPs and create new one
-    await db.otps.delete_many({"phone": clean_phone})
-    otp = generate_otp()
-    await db.otps.insert_one({
-        "phone": clean_phone,
-        "otp": otp,
-        "created_at": datetime.now(timezone.utc),
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
-    })
+    # Send new OTP via Termii Token API
+    pin_id = await send_sms_otp(clean_phone)
+    sms_sent = pin_id is not None
 
-    # Send OTP via SMS
-    sms_sent = await send_sms_otp(clean_phone, otp)
+    if pin_id:
+        await db.otps.delete_many({"phone": clean_phone})
+        await db.otps.insert_one({
+            "phone": clean_phone,
+            "pin_id": pin_id,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        })
+
     logger.info(f"OTP resent for {clean_phone[-4:]} (sent={sms_sent})")
 
     return {"success": True, "message": "OTP resent", "otp_sent": sms_sent}
@@ -1387,10 +1520,11 @@ async def monnify_verify_payer(request: Request):
             content={"responseCode": "01", "responseMessage": "Customer ID is required"},
         )
 
-    # Look up user by phone number, email, or user ID
+    # Look up user by phone number (normalized), email, or user ID
+    normalized_cid = normalize_phone(customer_id) if any(c.isdigit() for c in customer_id) and "@" not in customer_id else customer_id
     user = await db.users.find_one({
         "$or": [
-            {"phone": customer_id},
+            {"phone": normalized_cid},
             {"email": customer_id},
             {"id": customer_id},
         ]
