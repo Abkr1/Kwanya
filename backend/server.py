@@ -391,31 +391,36 @@ def generate_otp() -> str:
 
 
 async def send_sms_otp(phone: str, otp: str) -> bool:
-    """Send OTP via Termii SMS API. Returns True on success."""
+    """Send OTP via Termii SMS API using DND channel. Returns True on success."""
     if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
         logger.warning(f"Termii not configured — OTP for {phone[-4:]}: {otp}")
         return False
+
+    # Ensure phone is in international format without '+' (e.g. 2347012345678)
+    clean_phone = phone.lstrip("+")
+    if clean_phone.startswith("0"):
+        clean_phone = "234" + clean_phone[1:]
+
     try:
         async with httpx.AsyncClient(timeout=15) as http:
-            # Try registered sender ID on generic channel first
             payload = {
-                "to": phone,
+                "to": clean_phone,
                 "from": TERMII_SENDER_ID,
                 "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
                 "type": "plain",
-                "channel": "generic",
+                "channel": "dnd",
                 "api_key": TERMII_API_KEY,
             }
             resp = await http.post("https://api.ng.termii.com/api/sms/send", json=payload)
-            if resp.status_code == 404 or (resp.status_code == 200 and resp.json().get("code") == 404):
-                # Sender ID not approved yet — fall back to DND route
-                logger.warning(f"Sender ID '{TERMII_SENDER_ID}' not approved, using DND fallback")
-                payload["from"] = "N-Alert"
-                payload["channel"] = "dnd"
-                resp = await http.post("https://api.ng.termii.com/api/sms/send", json=payload)
-            resp.raise_for_status()
-            logger.info(f"SMS OTP sent to {phone[-4:]}")
-            return True
+            data = resp.json()
+            logger.info(f"Termii SMS response for {clean_phone[-4:]}: status={resp.status_code} body={data}")
+
+            if resp.status_code == 200 and data.get("message_id"):
+                logger.info(f"SMS OTP sent to {clean_phone[-4:]} (message_id={data['message_id']})")
+                return True
+
+            logger.error(f"Termii SMS failed for {clean_phone[-4:]}: {data}")
+            return False
     except Exception as e:
         logger.error(f"Termii SMS failed for {phone[-4:]}: {e}")
         return False
