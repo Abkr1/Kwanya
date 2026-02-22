@@ -93,9 +93,26 @@ export default function KwanyaApp() {
   useEffect(() => { recordingRef.current = recording; }, [recording]);
   useEffect(() => { conversationRef.current = currentConversation; }, [currentConversation]);
 
+  const prevAuthRef = useRef(isAuthenticated);
+
   // Use authenticated user ID when available, otherwise fall back to anonymous ID
   useEffect(() => {
+    const wasAuthenticated = prevAuthRef.current;
+    prevAuthRef.current = isAuthenticated;
+
     const loadOrCreateUserId = async () => {
+      // On logout: clear chat state immediately and generate fresh anonymous ID
+      if (wasAuthenticated && !isAuthenticated) {
+        setMessages([]);
+        setCurrentConversation(null);
+        setConversationHistory([]);
+        creatingConversationRef.current = null;
+        const freshId = 'anon-' + Date.now();
+        await AsyncStorage.setItem(USER_ID_STORAGE_KEY, freshId);
+        setUserId(freshId);
+        return;
+      }
+
       try {
         if (isAuthenticated && user) {
           setUserId(user.id);
@@ -104,25 +121,17 @@ export default function KwanyaApp() {
         }
         let storedId = await AsyncStorage.getItem(USER_ID_STORAGE_KEY);
         if (!storedId) {
-          storedId = 'user-' + Date.now();
+          storedId = 'anon-' + Date.now();
           await AsyncStorage.setItem(USER_ID_STORAGE_KEY, storedId);
         }
         setUserId(storedId);
       } catch (error) {
         console.error('Failed to load/create user ID:', error);
-        setUserId('user-' + Date.now());
+        setUserId('anon-' + Date.now());
       }
     };
     loadOrCreateUserId();
   }, [isAuthenticated, user]);
-
-  // Clear chat state on logout (userId changes)
-  useEffect(() => {
-    setMessages([]);
-    setCurrentConversation(null);
-    setConversationHistory([]);
-    creatingConversationRef.current = null;
-  }, [userId]);
 
   // Initialize app once userId is ready
   useEffect(() => {
