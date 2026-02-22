@@ -895,6 +895,10 @@ export default function KwanyaApp() {
       color: palette.text,
       fontWeight: '500',
     },
+    chatDeleteButton: {
+      padding: 4,
+      marginLeft: 4,
+    },
     noChatText: {
       fontSize: 14,
       color: palette.textSubtle,
@@ -1209,6 +1213,31 @@ export default function KwanyaApp() {
                         currentConversation?.id === conv.id && styles.chatHistoryItemActive,
                       ]}
                       onPress={() => loadConversation(conv)}
+                      onLongPress={() => {
+                        Alert.alert(
+                          'Delete Chat',
+                          `Delete "${conv.title || 'New Conversation'}"?`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Delete',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
+                                  setConversationHistory((prev) => prev.filter((c) => c.id !== conv.id));
+                                  if (currentConversation?.id === conv.id) {
+                                    setCurrentConversation(null);
+                                    setMessages([]);
+                                  }
+                                } catch {
+                                  Alert.alert('Error', 'Failed to delete conversation');
+                                }
+                              },
+                            },
+                          ],
+                        );
+                      }}
                     >
                       <Ionicons
                         name="chatbubble-outline"
@@ -1224,6 +1253,37 @@ export default function KwanyaApp() {
                       >
                         {conv.title || 'New Conversation'}
                       </Text>
+                      <Pressable
+                        style={styles.chatDeleteButton}
+                        onPress={() => {
+                          Alert.alert(
+                            'Delete Chat',
+                            `Delete "${conv.title || 'New Conversation'}"?`,
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Delete',
+                                style: 'destructive',
+                                onPress: async () => {
+                                  try {
+                                    await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
+                                    setConversationHistory((prev) => prev.filter((c) => c.id !== conv.id));
+                                    if (currentConversation?.id === conv.id) {
+                                      setCurrentConversation(null);
+                                      setMessages([]);
+                                    }
+                                  } catch {
+                                    Alert.alert('Error', 'Failed to delete conversation');
+                                  }
+                                },
+                              },
+                            ],
+                          );
+                        }}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={palette.textMuted} />
+                      </Pressable>
                     </Pressable>
                   )}
                 />
