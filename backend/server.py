@@ -451,31 +451,38 @@ async def verify_sms_otp_via_termii(pin_id: str, otp: str) -> bool:
 
 @api_router.get("/debug/test-sms/{phone}")
 async def debug_test_sms(phone: str):
-    """Debug endpoint: test Termii Token OTP API and return raw response."""
+    """Debug endpoint: list sender IDs and test Token OTP API with Termii default."""
     clean_phone = phone.lstrip("+")
     if clean_phone.startswith("0"):
         clean_phone = "234" + clean_phone[1:]
 
     results = {}
     async with httpx.AsyncClient(timeout=15) as http:
-        # Test Token OTP API (the one we actually use)
+        # 1. List all sender IDs on account
+        try:
+            sid_resp = await http.get(f"https://api.ng.termii.com/api/sender-id?api_key={TERMII_API_KEY}")
+            results["sender_ids"] = {"status": sid_resp.status_code, "body": sid_resp.json()}
+        except Exception as e:
+            results["sender_ids"] = {"error": str(e)}
+
+        # 2. Test Token OTP with "Termii" as sender (Termii's own default)
         try:
             token_resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json={
                 "api_key": TERMII_API_KEY,
                 "message_type": "NUMERIC",
                 "to": clean_phone,
-                "from": "N-Alert",
-                "channel": "dnd",
+                "from": "Termii",
+                "channel": "generic",
                 "pin_attempts": 3,
                 "pin_time_to_live": 5,
                 "pin_length": 6,
                 "pin_placeholder": "< 1234 >",
-                "message_text": "Kwanya test code: < 1234 >",
+                "message_text": "Your Kwanya code is < 1234 >",
                 "pin_type": "NUMERIC",
             })
-            results["token_otp_api"] = {"status": token_resp.status_code, "body": token_resp.json()}
+            results["token_otp_termii_sender"] = {"status": token_resp.status_code, "body": token_resp.json()}
         except Exception as e:
-            results["token_otp_api"] = {"error": str(e)}
+            results["token_otp_termii_sender"] = {"error": str(e)}
 
     return {"phone_sent_to": clean_phone, "results": results}
 
