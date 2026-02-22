@@ -478,7 +478,7 @@ async def transcribe_audio(
         if not await deduct_credits(user_id, VOICE_CREDIT_COST):
             raise HTTPException(
                 status_code=402,
-                detail=f"Insufficient credits. You need {VOICE_CREDIT_COST} credits to send a voice message.",
+                detail="Insufficient credits. Please top up to continue.",
             )
         credits_deducted = True
     else:
@@ -579,11 +579,11 @@ async def transcribe_audio(
 
 # ==================== CHAT ENDPOINT ====================
 
-CHAT_CREDIT_COST = 1   # credits per text message
-VOICE_CREDIT_COST = 2  # credits per voice message
+CHAT_CREDIT_COST = 7   # credits (₦7) per text message
+VOICE_CREDIT_COST = 7  # credits (₦7) per voice message
 CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
-FREE_MESSAGE_LIMIT = 10  # free messages for unauthenticated users
-WELCOME_BONUS_CREDITS = 20  # free credits for new signups
+FREE_MESSAGE_LIMIT = 3   # free messages for unauthenticated users
+WELCOME_BONUS_CREDITS = 21  # 3 free messages × ₦7 per message
 
 
 async def deduct_credits(user_id: str, amount: int) -> bool:
@@ -617,7 +617,7 @@ async def chat(request: ChatRequest):
             if not await deduct_credits(request.user_id, CHAT_CREDIT_COST):
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Insufficient credits. You need {CHAT_CREDIT_COST} credit(s) to send a message.",
+                    detail="Insufficient credits. Please top up to continue.",
                 )
         else:
             # Unauthenticated — enforce free message limit across ALL conversations
