@@ -319,27 +319,6 @@ export default function SettingsScreen() {
         accountItemTextDanger: {
           color: '#FF3B30',
         },
-        accountInfo: {
-          backgroundColor: palette.surface,
-          borderRadius: 14,
-          borderWidth: 1,
-          borderColor: palette.border,
-          paddingHorizontal: 16,
-          paddingVertical: 16,
-          marginBottom: 20,
-        },
-        accountInfoLabel: {
-          fontSize: 12,
-          color: palette.textSubtle,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-          marginBottom: 4,
-        },
-        accountInfoValue: {
-          fontSize: 16,
-          color: palette.text,
-          fontWeight: '600',
-        },
       }),
     [palette, insets],
   );
@@ -460,12 +439,6 @@ export default function SettingsScreen() {
 
       {section === 'account' && (
         <View style={styles.accountSection}>
-          <View style={styles.accountInfo}>
-            <Text style={styles.accountInfoLabel}>Signed in as</Text>
-            <Text style={styles.accountInfoValue}>
-              {user?.email || user?.phone || 'User'}
-            </Text>
-          </View>
           <TouchableOpacity style={styles.accountItem} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={22} color={palette.text} />
             <Text style={styles.accountItemText}>Log Out</Text>
