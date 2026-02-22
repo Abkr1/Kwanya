@@ -37,6 +37,7 @@ export default function CreditsScreen() {
   const { user, isAuthenticated, token } = useAuth();
 
   const [balance, setBalance] = useState(user?.credit_balance ?? 0);
+  const [showBalance, setShowBalance] = useState(false);
   const [customAmount, setCustomAmount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
@@ -195,6 +196,12 @@ export default function CreditsScreen() {
           textTransform: 'uppercase',
           letterSpacing: 0.5,
           fontWeight: '600',
+        },
+        balanceValue: {
+          fontSize: 36,
+          fontWeight: '800',
+          color: palette.text,
+          marginBottom: 4,
         },
         barTrack: {
           height: 8,
@@ -454,21 +461,35 @@ export default function CreditsScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Balance Bar */}
-          <View style={styles.balanceCard}>
-            <Text style={styles.balanceLabel}>Your Balance</Text>
-            <View style={styles.barTrack}>
-              <View
-                style={[
-                  styles.barFill,
-                  { width: `${Math.min(100, Math.max(2, (balance / Math.max(balance, 500)) * 100))}%` },
-                ]}
-              />
-            </View>
-            <Text style={styles.balanceHint}>
-              {balance === 0 ? 'No credits remaining' : balance < 30 ? 'Running low' : 'Credits available'}
-            </Text>
-          </View>
+          {/* Balance Card */}
+          <TouchableOpacity
+            style={styles.balanceCard}
+            onPress={() => setShowBalance(!showBalance)}
+            activeOpacity={0.7}
+          >
+            {showBalance ? (
+              <>
+                <Text style={styles.balanceLabel}>Your Balance</Text>
+                <Text style={styles.balanceValue}>{balance.toLocaleString()}</Text>
+                <Text style={styles.balanceHint}>credits</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.balanceLabel}>Show Balance</Text>
+                <View style={styles.barTrack}>
+                  <View
+                    style={[
+                      styles.barFill,
+                      { width: `${Math.min(100, Math.max(2, (balance / Math.max(balance, 500)) * 100))}%` },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.balanceHint}>
+                  {balance === 0 ? 'No credits remaining' : balance < 30 ? 'Running low' : 'Tap to view balance'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
 
           {/* Preset Packs */}
           <View style={styles.section}>
