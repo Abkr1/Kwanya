@@ -402,30 +402,39 @@ async def send_sms_otp(phone: str) -> Optional[str]:
     if clean_phone.startswith("0"):
         clean_phone = "234" + clean_phone[1:]
 
+    # Try each sender ID until one works
+    sender_options = [
+        {"from": TERMII_SENDER_ID, "channel": "generic"},
+        {"from": TERMII_SENDER_ID, "channel": "dnd"},
+    ]
+
     try:
         async with httpx.AsyncClient(timeout=15) as http:
-            payload = {
-                "api_key": TERMII_API_KEY,
-                "message_type": "NUMERIC",
-                "to": clean_phone,
-                "from": "N-Alert",
-                "channel": "dnd",
-                "pin_attempts": 3,
-                "pin_time_to_live": 5,
-                "pin_length": 6,
-                "pin_placeholder": "< 1234 >",
-                "message_text": "Your Kwanya verification code is < 1234 >. It expires in 5 minutes.",
-                "pin_type": "NUMERIC",
-            }
-            resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json=payload)
-            data = resp.json()
-            logger.info(f"Termii Token API response for {clean_phone[-4:]}: status={resp.status_code} body={data}")
+            for option in sender_options:
+                payload = {
+                    "api_key": TERMII_API_KEY,
+                    "message_type": "NUMERIC",
+                    "to": clean_phone,
+                    "from": option["from"],
+                    "channel": option["channel"],
+                    "pin_attempts": 3,
+                    "pin_time_to_live": 5,
+                    "pin_length": 6,
+                    "pin_placeholder": "< 1234 >",
+                    "message_text": "Your Kwanya verification code is < 1234 >. It expires in 5 minutes.",
+                    "pin_type": "NUMERIC",
+                }
+                resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json=payload)
+                data = resp.json()
+                logger.info(f"Termii Token API ({option['from']}/{option['channel']}) for {clean_phone[-4:]}: status={resp.status_code} body={data}")
 
-            if resp.status_code == 200 and data.get("pinId"):
-                logger.info(f"OTP sent to {clean_phone[-4:]} (pinId={data['pinId']})")
-                return data["pinId"]
+                if resp.status_code == 200 and data.get("pinId"):
+                    logger.info(f"OTP sent to {clean_phone[-4:]} via {option['from']}/{option['channel']} (pinId={data['pinId']})")
+                    return data["pinId"]
 
-            logger.error(f"Termii Token API failed for {clean_phone[-4:]}: {data}")
+                logger.warning(f"Termii {option['from']}/{option['channel']} failed for {clean_phone[-4:]}")
+
+            logger.error(f"All Termii channels failed for {clean_phone[-4:]}")
             return None
     except Exception as e:
         logger.error(f"Termii OTP failed for {phone[-4:]}: {e}")
