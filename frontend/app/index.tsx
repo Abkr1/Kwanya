@@ -116,6 +116,14 @@ export default function KwanyaApp() {
     loadOrCreateUserId();
   }, [isAuthenticated, user]);
 
+  // Clear chat state on logout (userId changes)
+  useEffect(() => {
+    setMessages([]);
+    setCurrentConversation(null);
+    setConversationHistory([]);
+    creatingConversationRef.current = null;
+  }, [userId]);
+
   // Initialize app once userId is ready
   useEffect(() => {
     if (!userId) return;
