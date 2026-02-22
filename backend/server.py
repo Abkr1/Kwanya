@@ -379,6 +379,25 @@ async def get_current_user(authorization: Optional[str] = None):
         return None
 
 
+def normalize_phone(phone: str) -> str:
+    """Normalize phone to local format: 0XXXXXXXXXX.
+    Converts +234..., 234... to 0... format."""
+    digits = re.sub(r'[^\d]', '', phone.lstrip("+"))
+    if digits.startswith("234") and len(digits) > 10:
+        digits = "0" + digits[3:]
+    if not digits.startswith("0"):
+        digits = "0" + digits
+    return digits
+
+
+def phone_to_international(phone: str) -> str:
+    """Convert local phone (0XXXXXXXXXX) to international format (234XXXXXXXXXX) for Termii."""
+    digits = re.sub(r'[^\d]', '', phone)
+    if digits.startswith("0"):
+        digits = "234" + digits[1:]
+    return digits
+
+
 def generate_email_from_phone(phone: str) -> str:
     """Generate an email address from phone number using trulib.com domain"""
     clean_phone = re.sub(r'[^\d]', '', phone)
@@ -397,10 +416,8 @@ async def send_sms_otp(phone: str) -> Optional[str]:
         logger.warning(f"Termii not configured — cannot send OTP to {phone[-4:]}")
         return None
 
-    # Ensure phone is in international format without '+' (e.g. 2347012345678)
-    clean_phone = phone.lstrip("+")
-    if clean_phone.startswith("0"):
-        clean_phone = "234" + clean_phone[1:]
+    # Convert to international format for Termii API
+    clean_phone = phone_to_international(phone)
 
     # Try each sender ID until one works
     sender_options = [
@@ -461,9 +478,7 @@ async def verify_sms_otp_via_termii(pin_id: str, otp: str) -> bool:
 @api_router.get("/debug/test-sms/{phone}")
 async def debug_test_sms(phone: str):
     """Debug endpoint: list sender IDs and test Token OTP API with Termii default."""
-    clean_phone = phone.lstrip("+")
-    if clean_phone.startswith("0"):
-        clean_phone = "234" + clean_phone[1:]
+    clean_phone = phone_to_international(phone)
 
     results = {}
     async with httpx.AsyncClient(timeout=15) as http:
@@ -494,6 +509,30 @@ async def debug_test_sms(phone: str):
             results["token_otp_termii_sender"] = {"error": str(e)}
 
     return {"phone_sent_to": clean_phone, "results": results}
+
+
+@api_router.post("/debug/migrate-phones")
+async def migrate_phone_numbers():
+    """One-time migration: convert all +234/234 phone numbers to 0-prefix local format."""
+    updated = 0
+    async for user in db.users.find({"phone": {"$exists": True}}, {"_id": 0, "id": 1, "phone": 1}):
+        old_phone = user.get("phone", "")
+        new_phone = normalize_phone(old_phone)
+        if old_phone != new_phone:
+            await db.users.update_one({"id": user["id"]}, {"$set": {"phone": new_phone}})
+            updated += 1
+            logger.info(f"Migrated phone: {old_phone} → {new_phone}")
+
+    # Also migrate OTP records
+    otp_updated = 0
+    async for otp in db.otps.find({"phone": {"$exists": True}}):
+        old_phone = otp.get("phone", "")
+        new_phone = normalize_phone(old_phone)
+        if old_phone != new_phone:
+            await db.otps.update_one({"_id": otp["_id"]}, {"$set": {"phone": new_phone}})
+            otp_updated += 1
+
+    return {"success": True, "users_updated": updated, "otps_updated": otp_updated}
 
 
 async def send_verification_email(email: str, code: str) -> bool:
@@ -875,7 +914,7 @@ auth_router = APIRouter(prefix="/api/auth", dependencies=[Depends(check_auth_rat
 async def signup_with_phone(request: PhoneSignupRequest):
     """Sign up with phone number - auto-generates email at trulib.com"""
     # Validate phone format (basic check)
-    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    clean_phone = normalize_phone(request.phone)
     if len(clean_phone) < 10:
         raise HTTPException(status_code=400, detail="Invalid phone number")
 
@@ -1031,9 +1070,12 @@ async def signin(request: SigninRequest):
     """Sign in with phone or email + password"""
     identifier = request.identifier.strip()
 
+    # Normalize phone for lookup (handles +234, 234, 0 formats)
+    normalized_phone = normalize_phone(identifier) if any(c.isdigit() for c in identifier) and "@" not in identifier else identifier
+
     user = await db.users.find_one({
         "$or": [
-            {"phone": identifier},
+            {"phone": normalized_phone},
             {"email": identifier.lower()},
         ]
     })
@@ -1094,7 +1136,7 @@ async def signin_with_google(request: GoogleSigninRequest):
 @auth_router.post("/verify-otp")
 async def verify_otp(request: VerifyOTPRequest):
     """Verify phone OTP code via Termii"""
-    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    clean_phone = normalize_phone(request.phone)
 
     otp_record = await db.otps.find_one({
         "phone": clean_phone,
@@ -1150,7 +1192,7 @@ async def verify_email(request: VerifyEmailCodeRequest):
 @auth_router.post("/resend-otp")
 async def resend_otp(request: ResendOTPRequest):
     """Resend phone OTP"""
-    clean_phone = re.sub(r'[^\d+]', '', request.phone)
+    clean_phone = normalize_phone(request.phone)
 
     user = await db.users.find_one({"phone": clean_phone})
     if not user:
@@ -1468,10 +1510,11 @@ async def monnify_verify_payer(request: Request):
             content={"responseCode": "01", "responseMessage": "Customer ID is required"},
         )
 
-    # Look up user by phone number, email, or user ID
+    # Look up user by phone number (normalized), email, or user ID
+    normalized_cid = normalize_phone(customer_id) if any(c.isdigit() for c in customer_id) and "@" not in customer_id else customer_id
     user = await db.users.find_one({
         "$or": [
-            {"phone": customer_id},
+            {"phone": normalized_cid},
             {"email": customer_id},
             {"id": customer_id},
         ]
