@@ -447,16 +447,14 @@ export default function SettingsScreen() {
             <Text style={styles.menuItemText}>Privacy Policy</Text>
             <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
           </TouchableOpacity>
-          {isAuthenticated && user && (
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => setSection('account')}
-            >
-              <Ionicons name="person-outline" size={22} color={palette.textMuted} />
-              <Text style={styles.menuItemText}>Account Settings</Text>
-              <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => setSection('account')}
+          >
+            <Ionicons name="person-outline" size={22} color={palette.textMuted} />
+            <Text style={styles.menuItemText}>Account Settings</Text>
+            <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+          </TouchableOpacity>
         </View>
       )}
 
