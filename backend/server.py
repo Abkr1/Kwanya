@@ -1613,7 +1613,8 @@ async def monnify_webhook(request: Request):
             }) if customer_id else None
 
             if user and amount_paid > 0:
-                credits = int(amount_paid)  # 1:1 Naira to credits ratio
+                OFFLINE_BONUS_CREDITS = 30
+                credits = int(amount_paid) + OFFLINE_BONUS_CREDITS  # 1:1 ratio + 30 bonus
 
                 # Idempotency check — don't process same reference twice
                 existing = await db.transactions.find_one({"payment_reference": payment_reference})
@@ -1633,7 +1634,7 @@ async def monnify_webhook(request: Request):
                         {"id": user["id"]},
                         {"$inc": {"credit_balance": credits}},
                     )
-                    logger.info(f"Offline payment: credited {credits} credits to user {user['id']}")
+                    logger.info(f"Offline payment: credited {credits} credits ({int(amount_paid)} + {OFFLINE_BONUS_CREDITS} bonus) to user {user['id']}")
             else:
                 logger.warning(f"Offline webhook — could not match user for ref: {payment_reference}, customer: {customer_id}")
 
