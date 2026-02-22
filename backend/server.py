@@ -435,7 +435,25 @@ async def send_sms_otp(phone: str, otp: str) -> bool:
                 logger.info(f"SMS OTP sent via Number API to {clean_phone[-4:]} (message_id={data2['message_id']})")
                 return True
 
-            logger.error(f"Termii Number API also failed for {clean_phone[-4:]}: {data2}")
+            # 3. Fallback to Kwanya sender ID on generic channel
+            logger.warning(f"Number API failed for {clean_phone[-4:]}, falling back to Kwanya sender ID")
+            sender_payload = {
+                "to": clean_phone,
+                "from": TERMII_SENDER_ID,
+                "sms": f"Your Kwanya verification code is: {otp}. It expires in 5 minutes.",
+                "type": "plain",
+                "channel": "generic",
+                "api_key": TERMII_API_KEY,
+            }
+            resp3 = await http.post("https://api.ng.termii.com/api/sms/send", json=sender_payload)
+            data3 = resp3.json()
+            logger.info(f"Termii Sender ID response for {clean_phone[-4:]}: status={resp3.status_code} body={data3}")
+
+            if resp3.status_code == 200 and data3.get("message_id"):
+                logger.info(f"SMS OTP sent via Sender ID to {clean_phone[-4:]} (message_id={data3['message_id']})")
+                return True
+
+            logger.error(f"All Termii channels failed for {clean_phone[-4:]}: {data3}")
             return False
     except Exception as e:
         logger.error(f"Termii OTP failed for {phone[-4:]}: {e}")
