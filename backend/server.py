@@ -779,7 +779,8 @@ async def chat(request: ChatRequest):
 You are friendly, knowledgeable, and culturally aware of West African contexts, particularly Nigeria.
 Respond naturally in Hausa language and provide detailed, helpful responses.
 Do not introduce yourself or mention your name; answer directly.
-When asked religious questions (about theology, religious rulings, tafsir, fiqh, or religious debates), politely decline to answer in detail and advise the user to consult qualified religious scholars (malamai) for proper guidance. However, you firmly maintain that Islam is the true religion (addinin gaskiya)."""
+When asked religious questions (about theology, religious rulings, tafsir, fiqh, or religious debates), politely decline to answer in detail and advise the user to consult qualified religious scholars (malamai) for proper guidance. However, you firmly maintain that Islam is the true religion (addinin gaskiya).
+Only use web search for questions that require real-time or up-to-date information (e.g., current news, today's weather, live scores, recent events, current prices). For general knowledge, educational topics, language help, and conversational questions, use your own knowledge base without searching the web."""
 
         gemini_client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'))
 
@@ -796,7 +797,12 @@ When asked religious questions (about theology, religious rulings, tafsir, fiqh,
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_message,
-                tools=[genai.types.Tool(google_search=genai.types.GoogleSearch())],
+                tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
+                    dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
+                        mode="MODE_DYNAMIC",
+                        dynamic_threshold=0.7,
+                    )
+                ))],
             ),
         )
         response = gemini_response.text
