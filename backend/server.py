@@ -788,12 +788,15 @@ Do not introduce yourself or mention your name; answer directly."""
             role = "user" if msg["role"] == "user" else "model"
             history.append(genai.types.Content(role=role, parts=[genai.types.Part(text=msg["content"])]))
 
-        # Get response from Gemini
+        # Get response from Gemini with Google Search grounding
         gemini_response = await asyncio.to_thread(
             gemini_client.models.generate_content,
             model="gemini-2.0-flash",
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
-            config=genai.types.GenerateContentConfig(system_instruction=system_message),
+            config=genai.types.GenerateContentConfig(
+                system_instruction=system_message,
+                tools=[genai.types.Tool(google_search=genai.types.GoogleSearch())],
+            ),
         )
         response = gemini_response.text
 
