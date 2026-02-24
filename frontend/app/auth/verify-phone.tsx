@@ -15,11 +15,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
+import { useLanguage } from '../_contexts/LanguageContext';
 
 const OTP_LENGTH = 6;
 
 export default function VerifyPhoneScreen() {
   const { palette } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone: string }>();
@@ -67,7 +69,7 @@ export default function VerifyPhoneScreen() {
   const handleVerify = async () => {
     const otpString = otp.join('');
     if (otpString.length !== OTP_LENGTH) {
-      Alert.alert('Error', 'Please enter the complete verification code');
+      Alert.alert(t('common.error'), t('verifyPhone.incompleteCode'));
       return;
     }
 
@@ -76,11 +78,11 @@ export default function VerifyPhoneScreen() {
     setIsLoading(false);
 
     if (result.success) {
-      Alert.alert('Verified', 'Phone number verified successfully!', [
-        { text: 'Continue', onPress: () => router.replace('/') },
+      Alert.alert(t('verifyPhone.verified'), t('verifyPhone.verifiedMessage'), [
+        { text: t('common.continue'), onPress: () => router.replace('/') },
       ]);
     } else {
-      Alert.alert('Verification Failed', result.error || 'Invalid code');
+      Alert.alert(t('verifyPhone.verificationFailed'), result.error || t('verifyPhone.invalidCode'));
     }
   };
 
@@ -90,9 +92,9 @@ export default function VerifyPhoneScreen() {
     setIsResending(false);
 
     if (result.success) {
-      Alert.alert('Sent', 'A new verification code has been sent to your phone');
+      Alert.alert(t('verifyPhone.sent'), t('verifyPhone.resentMessage'));
     } else {
-      Alert.alert('Error', result.error || 'Failed to resend code');
+      Alert.alert(t('common.error'), result.error || t('verifyPhone.failedResend'));
     }
   };
 
@@ -214,7 +216,7 @@ export default function VerifyPhoneScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Verify Phone</Text>
+        <Text style={styles.headerTitle}>{t('verifyPhone.title')}</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -226,11 +228,11 @@ export default function VerifyPhoneScreen() {
             <Ionicons name="shield-checkmark-outline" size={36} color={palette.text} />
           </View>
 
-          <Text style={styles.title}>Enter Code</Text>
+          <Text style={styles.title}>{t('verifyPhone.enterCode')}</Text>
           <Text style={styles.subtitle}>
-            We sent a verification code to
+            {t('verifyPhone.subtitle')}
           </Text>
-          <Text style={styles.phoneText}>{phone || 'your phone'}</Text>
+          <Text style={styles.phoneText}>{phone || t('verifyPhone.fallback')}</Text>
 
           {/* OTP Inputs */}
           <View style={styles.otpRow}>
@@ -258,15 +260,15 @@ export default function VerifyPhoneScreen() {
             {isLoading ? (
               <ActivityIndicator size="small" color={palette.buttonText} />
             ) : (
-              <Text style={styles.verifyButtonText}>Verify</Text>
+              <Text style={styles.verifyButtonText}>{t('common.verify')}</Text>
             )}
           </TouchableOpacity>
 
           {/* Resend */}
           <TouchableOpacity style={styles.resendButton} onPress={handleResend} disabled={isResending}>
             <Text style={styles.resendText}>
-              Didn't receive the code?{' '}
-              <Text style={styles.resendTextBold}>{isResending ? 'Sending...' : 'Resend'}</Text>
+              {t('verifyPhone.didntReceive')}
+              <Text style={styles.resendTextBold}>{isResending ? t('common.sending') : t('common.resend')}</Text>
             </Text>
           </TouchableOpacity>
 

@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { ThemeProvider as NavThemeProvider, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { AuthProvider } from './_contexts/AuthContext';
 import { ThemeProvider, useTheme } from './_contexts/ThemeContext';
+import { LanguageProvider } from './_contexts/LanguageContext';
 
 function RootNavigator() {
   const { isDark, palette } = useTheme();
@@ -50,7 +51,9 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <RootNavigator />
+        <LanguageProvider>
+          <RootNavigator />
+        </LanguageProvider>
       </AuthProvider>
     </ThemeProvider>
   );
