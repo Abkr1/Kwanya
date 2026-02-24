@@ -11,6 +11,7 @@ import {
   Alert,
   Modal,
   FlatList,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -420,7 +421,7 @@ export default function SignupScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior="padding"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           style={styles.scrollContent}

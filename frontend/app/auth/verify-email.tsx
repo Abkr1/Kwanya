@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -217,7 +218,7 @@ export default function VerifyEmailScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior="padding"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.content}>
           <View style={styles.iconCircle}>
