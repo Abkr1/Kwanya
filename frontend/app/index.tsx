@@ -72,7 +72,6 @@ export default function KwanyaApp() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
   const [sidebarMounted, setSidebarMounted] = useState(false);
@@ -139,16 +138,6 @@ export default function KwanyaApp() {
 
     initializeApp();
 
-    // Keyboard listeners
-    const keyboardDidShowListener = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => setKeyboardVisible(true),
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKeyboardVisible(false),
-    );
-
     return () => {
       if (recordingRef.current) {
         recordingRef.current.unloadAsync();
@@ -156,8 +145,6 @@ export default function KwanyaApp() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
     };
   }, [userId]);
 
@@ -965,7 +952,7 @@ export default function KwanyaApp() {
     bottomInputContainer: {
       paddingHorizontal: 16,
       paddingVertical: 12,
-      paddingBottom: keyboardVisible ? 12 : Math.max(insets.bottom, 12),
+      paddingBottom: Math.max(insets.bottom, 12),
       backgroundColor: palette.bg,
       borderTopWidth: 1,
       borderTopColor: palette.border,
@@ -1033,7 +1020,7 @@ export default function KwanyaApp() {
     stopGeneratingButton: {
       padding: 6,
     },
-  }), [palette, insets, keyboardVisible]);
+  }), [palette, insets]);
 
   // Don't render until userId is loaded
   if (!userId) {
@@ -1297,8 +1284,8 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
-          keyboardVerticalOffset={insets.top}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
             <View style={styles.welcomeSection}>
@@ -1317,8 +1304,8 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
-          keyboardVerticalOffset={insets.top}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <FlatList
             ref={flatListRef}
