@@ -11,8 +11,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   BackHandler,
+  Linking,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  WebView = require('react-native-webview').WebView;
+}
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -143,9 +147,14 @@ export default function CreditsScreen() {
         { headers: authHeaders },
       );
       if (resp.data.success) {
-        setCheckoutUrl(resp.data.checkout_url);
         setCurrentPaymentRef(resp.data.payment_reference);
         startPolling(resp.data.payment_reference);
+        if (Platform.OS === 'web') {
+          // Open payment in new browser tab
+          window.open(resp.data.checkout_url, '_blank');
+        } else {
+          setCheckoutUrl(resp.data.checkout_url);
+        }
       }
     } catch (error: any) {
       const msg = error.response?.data?.detail || 'Failed to initialize payment';
@@ -165,6 +174,12 @@ export default function CreditsScreen() {
   const handleCloseCheckout = () => {
     setCheckoutUrl(null);
     // Polling continues in background
+  };
+
+  const handleCancelPayment = () => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    setCheckoutUrl(null);
+    setCurrentPaymentRef(null);
   };
 
   const styles = useMemo(
@@ -431,8 +446,35 @@ export default function CreditsScreen() {
     );
   }
 
-  // WebView checkout overlay
-  if (checkoutUrl) {
+  // Web: show waiting screen while payment tab is open
+  if (Platform.OS === 'web' && currentPaymentRef && !checkoutUrl) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={handleCancelPayment}>
+            <Ionicons name="arrow-back" size={24} color={palette.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Credits</Text>
+        </View>
+        <View style={styles.centeredContent}>
+          <ActivityIndicator size="large" color={palette.button} style={{ marginBottom: 20 }} />
+          <Text style={styles.noAuthTitle}>Completing Payment</Text>
+          <Text style={styles.noAuthSubtitle}>
+            Complete your payment in the new tab. This page will update automatically once payment is confirmed.
+          </Text>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleCancelPayment}
+          >
+            <Text style={styles.secondaryButtonText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Native: WebView checkout overlay
+  if (checkoutUrl && WebView) {
     return (
       <View style={styles.webviewContainer}>
         <View style={styles.webviewHeader}>
