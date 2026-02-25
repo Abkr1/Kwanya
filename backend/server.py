@@ -429,10 +429,9 @@ async def send_sms_otp(phone: str) -> Optional[str]:
     # Convert to international format for Termii API
     clean_phone = phone_to_international(phone)
 
-    # Try each sender ID until one works
+    # Use N-Alert sender ID on DND channel
     sender_options = [
-        {"from": TERMII_SENDER_ID, "channel": "generic"},
-        {"from": TERMII_SENDER_ID, "channel": "dnd"},
+        {"from": "N-Alert", "channel": "dnd"},
     ]
 
     try:
