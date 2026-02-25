@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -73,6 +73,7 @@ export default function SigninScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const filteredCountries = useMemo(() => {
     if (!countrySearch.trim()) return COUNTRY_CODES;
@@ -378,10 +379,12 @@ export default function SigninScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
+          ref={scrollViewRef}
           style={styles.scrollContent}
+          contentContainerStyle={{ flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -469,6 +472,9 @@ export default function SigninScreen() {
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
+                onFocus={() => {
+                  setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 300);
+                }}
               />
               <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
                 <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={palette.textSubtle} />

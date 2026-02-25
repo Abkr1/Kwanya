@@ -953,8 +953,8 @@ export default function KwanyaApp() {
     },
     bottomInputContainer: {
       paddingHorizontal: 16,
-      paddingVertical: 12,
-      paddingBottom: Math.max(insets.bottom, 12),
+      paddingTop: 8,
+      paddingBottom: insets.bottom + 4,
       backgroundColor: palette.bg,
       borderTopWidth: 1,
       borderTopColor: palette.border,
@@ -1286,7 +1286,7 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
@@ -1306,7 +1306,7 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <FlatList

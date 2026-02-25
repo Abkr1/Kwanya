@@ -71,7 +71,6 @@ export default function SignupScreen() {
   const [countrySearch, setCountrySearch] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -95,7 +94,7 @@ export default function SignupScreen() {
 
     setIsLoading(true);
     const fullPhone = selectedCountry.dial + phone.trim().replace(/^0+/, '');
-    const result = await signUpWithPhone(fullPhone, password, displayName.trim() || undefined);
+    const result = await signUpWithPhone(fullPhone, password);
     setIsLoading(false);
 
     if (result.success) {
@@ -116,7 +115,7 @@ export default function SignupScreen() {
     }
 
     setIsLoading(true);
-    const result = await signUpWithEmail(email.trim(), password, displayName.trim() || undefined);
+    const result = await signUpWithEmail(email.trim(), password);
     setIsLoading(false);
 
     if (result.success) {
@@ -456,22 +455,6 @@ export default function SignupScreen() {
                 {t('signup.emailTab')}
               </Text>
             </TouchableOpacity>
-          </View>
-
-          {/* Display Name */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('signup.displayNameLabel')}</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="person-outline" size={20} color={palette.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder={t('signup.yourName')}
-                placeholderTextColor={palette.textSubtle}
-                value={displayName}
-                onChangeText={setDisplayName}
-                autoCapitalize="words"
-              />
-            </View>
           </View>
 
           {/* Phone or Email input */}
