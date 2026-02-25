@@ -20,7 +20,7 @@ import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
 import { useLanguage } from '../_contexts/LanguageContext';
 
-type SigninMode = 'phone' | 'email';
+type Mode = 'phone' | 'email';
 
 interface CountryCode {
   name: string;
@@ -57,21 +57,19 @@ const COUNTRY_CODES: CountryCode[] = [
   { name: 'Australia', dial: '+61', flag: '\u{1F1E6}\u{1F1FA}' },
 ];
 
-export default function SigninScreen() {
+export default function ForgotPasswordScreen() {
   const { palette } = useTheme();
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { requestPasswordReset } = useAuth();
 
-  const [mode, setMode] = useState<SigninMode>('phone');
+  const [mode, setMode] = useState<Mode>('phone');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [selectedCountry, setSelectedCountry] = useState<CountryCode>(COUNTRY_CODES[0]);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const filteredCountries = useMemo(() => {
@@ -82,34 +80,33 @@ export default function SigninScreen() {
     );
   }, [countrySearch]);
 
-  const handleSignin = async () => {
+  const handleSendCode = async () => {
     let identifier: string;
     if (mode === 'phone') {
       if (!phone.trim()) {
-        Alert.alert(t('common.error'), t('signin.enterPhone'));
+        Alert.alert(t('common.error'), t('forgotPassword.enterPhone'));
         return;
       }
       identifier = selectedCountry.dial + phone.trim().replace(/^0+/, '');
     } else {
       if (!email.trim()) {
-        Alert.alert(t('common.error'), t('signin.enterEmail'));
+        Alert.alert(t('common.error'), t('forgotPassword.enterEmail'));
         return;
       }
       identifier = email.trim();
     }
-    if (!password.trim()) {
-      Alert.alert(t('common.error'), t('signin.enterPassword'));
-      return;
-    }
 
     setIsLoading(true);
-    const result = await signIn(identifier, password);
+    const result = await requestPasswordReset(identifier);
     setIsLoading(false);
 
     if (result.success) {
-      router.replace('/');
+      router.push({
+        pathname: '/auth/reset-password',
+        params: { identifier, method: result.method },
+      });
     } else {
-      Alert.alert(t('signin.signInFailed'), result.error || t('signin.invalidCredentials'));
+      Alert.alert(t('forgotPassword.failed'), result.error || t('forgotPassword.failedMessage'));
     }
   };
 
@@ -167,6 +164,7 @@ export default function SigninScreen() {
       fontSize: 15,
       color: palette.textSubtle,
       textAlign: 'center',
+      lineHeight: 22,
     },
     modeToggle: {
       flexDirection: 'row',
@@ -220,9 +218,6 @@ export default function SigninScreen() {
       fontSize: 16,
       color: palette.text,
     },
-    passwordToggle: {
-      padding: 4,
-    },
     phoneRow: {
       flexDirection: 'row',
       gap: 8,
@@ -257,15 +252,7 @@ export default function SigninScreen() {
       borderColor: palette.border,
       paddingHorizontal: 14,
     },
-    forgotPasswordText: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: palette.textSubtle,
-      textAlign: 'right',
-      marginBottom: 8,
-      marginTop: 4,
-    },
-    signinButton: {
+    sendButton: {
       backgroundColor: palette.button,
       borderRadius: 12,
       paddingVertical: 16,
@@ -274,24 +261,24 @@ export default function SigninScreen() {
       marginTop: 8,
       marginBottom: 16,
     },
-    signinButtonDisabled: {
+    sendButtonDisabled: {
       backgroundColor: palette.disabled,
     },
-    signinButtonText: {
+    sendButtonText: {
       fontSize: 16,
       fontWeight: '700',
       color: palette.buttonText,
     },
-    signupLink: {
+    backToSignin: {
       flexDirection: 'row',
       justifyContent: 'center',
       paddingVertical: 20,
     },
-    signupText: {
+    backToSigninText: {
       fontSize: 15,
       color: palette.textSubtle,
     },
-    signupTextBold: {
+    backToSigninBold: {
       fontSize: 15,
       fontWeight: '700',
       color: palette.text,
@@ -373,7 +360,7 @@ export default function SigninScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('signin.title')}</Text>
+        <Text style={styles.headerTitle}>{t('forgotPassword.title')}</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -387,10 +374,10 @@ export default function SigninScreen() {
         >
           <View style={styles.titleSection}>
             <View style={styles.iconCircle}>
-              <Ionicons name="log-in-outline" size={36} color={palette.text} />
+              <Ionicons name="key-outline" size={36} color={palette.text} />
             </View>
-            <Text style={styles.title}>{t('signin.heading')}</Text>
-            <Text style={styles.subtitle}>{t('signin.subtitle')}</Text>
+            <Text style={styles.title}>{t('forgotPassword.heading')}</Text>
+            <Text style={styles.subtitle}>{t('forgotPassword.subtitle')}</Text>
           </View>
 
           {/* Mode Toggle */}
@@ -400,7 +387,7 @@ export default function SigninScreen() {
               onPress={() => setMode('phone')}
             >
               <Text style={[styles.modeButtonText, mode === 'phone' && styles.modeButtonTextActive]}>
-                {t('signin.phoneNumber')}
+                {t('forgotPassword.phoneNumber')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -408,7 +395,7 @@ export default function SigninScreen() {
               onPress={() => setMode('email')}
             >
               <Text style={[styles.modeButtonText, mode === 'email' && styles.modeButtonTextActive]}>
-                {t('signin.emailTab')}
+                {t('forgotPassword.emailTab')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -416,7 +403,7 @@ export default function SigninScreen() {
           {/* Phone or Email input */}
           {mode === 'phone' ? (
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('signin.phoneNumber')}</Text>
+              <Text style={styles.inputLabel}>{t('forgotPassword.phoneNumber')}</Text>
               <View style={styles.phoneRow}>
                 <TouchableOpacity
                   style={styles.countryCodeButton}
@@ -439,7 +426,7 @@ export default function SigninScreen() {
             </View>
           ) : (
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('signin.emailAddress')}</Text>
+              <Text style={styles.inputLabel}>{t('forgotPassword.emailAddress')}</Text>
               <View style={styles.inputWrapper}>
                 <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.inputIcon} />
                 <TextInput
@@ -456,48 +443,23 @@ export default function SigninScreen() {
             </View>
           )}
 
-          {/* Password */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('signin.password')}</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="lock-closed-outline" size={20} color={palette.textSubtle} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder={t('signin.passwordPlaceholder')}
-                placeholderTextColor={palette.textSubtle}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-              />
-              <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
-                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={palette.textSubtle} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Forgot Password */}
-          <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
-            <Text style={styles.forgotPasswordText}>{t('signin.forgotPassword')}</Text>
-          </TouchableOpacity>
-
-          {/* Sign In Button */}
+          {/* Send Code Button */}
           <TouchableOpacity
-            style={[styles.signinButton, isLoading && styles.signinButtonDisabled]}
-            onPress={handleSignin}
+            style={[styles.sendButton, isLoading && styles.sendButtonDisabled]}
+            onPress={handleSendCode}
             disabled={isLoading}
           >
             {isLoading ? (
               <ActivityIndicator size="small" color={palette.buttonText} />
             ) : (
-              <Text style={styles.signinButtonText}>{t('signin.title')}</Text>
+              <Text style={styles.sendButtonText}>{t('forgotPassword.sendCode')}</Text>
             )}
           </TouchableOpacity>
 
-          {/* Sign up link */}
-          <TouchableOpacity style={styles.signupLink} onPress={() => router.replace('/auth/signup')}>
-            <Text style={styles.signupText}>{t('signin.dontHaveAccount')}</Text>
-            <Text style={styles.signupTextBold}>{t('common.signUp')}</Text>
+          {/* Back to sign in */}
+          <TouchableOpacity style={styles.backToSignin} onPress={() => router.back()}>
+            <Text style={styles.backToSigninText}>{t('forgotPassword.rememberPassword')}</Text>
+            <Text style={styles.backToSigninBold}>{t('common.signIn')}</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -512,7 +474,7 @@ export default function SigninScreen() {
         <View style={styles.pickerOverlay}>
           <View style={styles.pickerContainer}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>{t('signin.selectCountry')}</Text>
+              <Text style={styles.pickerTitle}>{t('forgotPassword.selectCountry')}</Text>
               <TouchableOpacity onPress={() => {
                 setCountryPickerVisible(false);
                 setCountrySearch('');
@@ -523,7 +485,7 @@ export default function SigninScreen() {
             <View style={styles.pickerSearchWrapper}>
               <TextInput
                 style={styles.pickerSearchInput}
-                placeholder={t('signin.searchCountry')}
+                placeholder={t('forgotPassword.searchCountry')}
                 placeholderTextColor={palette.textSubtle}
                 value={countrySearch}
                 onChangeText={setCountrySearch}

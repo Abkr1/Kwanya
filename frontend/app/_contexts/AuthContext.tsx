@@ -34,6 +34,8 @@ interface AuthContextType {
   resendOTP: (phone: string) => Promise<{ success: boolean; error?: string }>;
   resendEmailCode: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (displayName: string) => Promise<{ success: boolean; error?: string }>;
+  requestPasswordReset: (identifier: string) => Promise<{ success: boolean; method?: string; error?: string }>;
+  resetPassword: (identifier: string, code: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -278,6 +280,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [token, user]);
 
+  const requestPasswordReset = useCallback(async (identifier: string) => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/auth/forgot-password`, { identifier });
+      if (response.data.success) {
+        return { success: true, method: response.data.method };
+      }
+      return { success: false, error: 'Failed to send reset code' };
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || 'Failed to send reset code';
+      return { success: false, error: msg };
+    }
+  }, []);
+
+  const resetPassword = useCallback(async (identifier: string, code: string, newPassword: string) => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/api/auth/reset-password`, {
+        identifier,
+        code,
+        new_password: newPassword,
+      });
+      if (response.data.success) return { success: true };
+      return { success: false, error: 'Password reset failed' };
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || 'Password reset failed';
+      return { success: false, error: msg };
+    }
+  }, []);
+
   const value = useMemo(() => ({
     user,
     token,
@@ -294,9 +324,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resendOTP,
     resendEmailCode,
     updateProfile,
+    requestPasswordReset,
+    resetPassword,
   }), [user, token, isLoading, isAuthenticated, signUpWithPhone, signUpWithEmail,
     signUpWithGoogle, signIn, signInWithGoogle, signOut, verifyOTP, verifyEmail,
-    resendOTP, resendEmailCode, updateProfile]);
+    resendOTP, resendEmailCode, updateProfile, requestPasswordReset, resetPassword]);
 
   return (
     <AuthContext.Provider value={value}>

@@ -340,6 +340,16 @@ class ResendEmailCodeRequest(BaseModel):
     email: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    identifier: str  # phone or email
+
+
+class ResetPasswordRequest(BaseModel):
+    identifier: str
+    code: str
+    new_password: str
+
+
 class UpdateProfileRequest(BaseModel):
     display_name: Optional[str] = None
 
@@ -405,8 +415,8 @@ def generate_email_from_phone(phone: str) -> str:
 
 
 def generate_otp() -> str:
-    """Generate a 6-digit OTP"""
-    return f"{secrets.randbelow(1000000):06d}"
+    """Generate a 4-digit OTP"""
+    return f"{secrets.randbelow(10000):04d}"
 
 
 async def send_sms_otp(phone: str) -> Optional[str]:
@@ -436,7 +446,7 @@ async def send_sms_otp(phone: str) -> Optional[str]:
                     "channel": option["channel"],
                     "pin_attempts": 3,
                     "pin_time_to_live": 5,
-                    "pin_length": 6,
+                    "pin_length": 4,
                     "pin_placeholder": "< 1234 >",
                     "message_text": "Your Kwanya verification code is < 1234 >. It expires in 5 minutes.",
                     "pin_type": "NUMERIC",
@@ -499,7 +509,7 @@ async def debug_test_sms(phone: str):
                 "channel": "generic",
                 "pin_attempts": 3,
                 "pin_time_to_live": 5,
-                "pin_length": 6,
+                "pin_length": 4,
                 "pin_placeholder": "< 1234 >",
                 "message_text": "Your Kwanya code is < 1234 >",
                 "pin_type": "NUMERIC",
@@ -1266,6 +1276,115 @@ async def resend_email_code(request: ResendEmailCodeRequest):
     logger.info(f"Email verification code resent for {email} (sent={email_sent})")
 
     return {"success": True, "message": "Verification code resent", "verification_sent": email_sent}
+
+
+@auth_router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Send password reset code via SMS OTP or email"""
+    identifier = request.identifier.strip()
+    is_email = "@" in identifier
+
+    if is_email:
+        email = identifier.lower()
+        user = await db.users.find_one({"email": email})
+        if not user:
+            raise HTTPException(status_code=404, detail="No account found with this email")
+        if not user.get("password_hash"):
+            raise HTTPException(status_code=400, detail="This account uses Google sign-in. Password reset is not available.")
+
+        # Generate and store reset code
+        code = generate_otp()
+        await db.password_reset_codes.delete_many({"identifier": email})
+        await db.password_reset_codes.insert_one({
+            "identifier": email,
+            "code": code,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+        })
+
+        email_sent = await send_verification_email(email, code)
+        logger.info(f"Password reset code sent to {email} (sent={email_sent})")
+
+        return {"success": True, "method": "email"}
+    else:
+        clean_phone = normalize_phone(identifier)
+        if len(clean_phone) < 10:
+            raise HTTPException(status_code=400, detail="Invalid phone number")
+
+        user = await db.users.find_one({"phone": clean_phone})
+        if not user:
+            raise HTTPException(status_code=404, detail="No account found with this phone number")
+        if not user.get("password_hash"):
+            raise HTTPException(status_code=400, detail="This account uses Google sign-in. Password reset is not available.")
+
+        # Send OTP via Termii
+        pin_id = await send_sms_otp(clean_phone)
+        sms_sent = pin_id is not None
+
+        if pin_id:
+            await db.password_reset_codes.delete_many({"identifier": clean_phone})
+            await db.password_reset_codes.insert_one({
+                "identifier": clean_phone,
+                "pin_id": pin_id,
+                "created_at": datetime.now(timezone.utc),
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+            })
+
+        logger.info(f"Password reset OTP for {clean_phone[-4:]} (sent={sms_sent})")
+
+        return {"success": True, "method": "phone"}
+
+
+@auth_router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """Verify reset code and update password"""
+    identifier = request.identifier.strip()
+    is_email = "@" in identifier
+
+    if len(request.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    if is_email:
+        email = identifier.lower()
+        # Verify code from DB
+        reset_record = await db.password_reset_codes.find_one({
+            "identifier": email,
+            "code": request.code,
+            "expires_at": {"$gt": datetime.now(timezone.utc)},
+        })
+        if not reset_record:
+            raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+        # Update password
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"password_hash": hash_password(request.new_password), "updated_at": datetime.now(timezone.utc)}},
+        )
+        await db.password_reset_codes.delete_many({"identifier": email})
+        logger.info(f"Password reset for email {email}")
+    else:
+        clean_phone = normalize_phone(identifier)
+        reset_record = await db.password_reset_codes.find_one({
+            "identifier": clean_phone,
+            "expires_at": {"$gt": datetime.now(timezone.utc)},
+        })
+        if not reset_record or not reset_record.get("pin_id"):
+            raise HTTPException(status_code=400, detail="No pending reset code found. Please request a new one.")
+
+        # Verify via Termii
+        verified = await verify_sms_otp_via_termii(reset_record["pin_id"], request.code)
+        if not verified:
+            raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+        # Update password
+        await db.users.update_one(
+            {"phone": clean_phone},
+            {"$set": {"password_hash": hash_password(request.new_password), "updated_at": datetime.now(timezone.utc)}},
+        )
+        await db.password_reset_codes.delete_many({"identifier": clean_phone})
+        logger.info(f"Password reset for phone {clean_phone[-4:]}")
+
+    return {"success": True, "message": "Password reset successfully"}
 
 
 @auth_router.get("/me")

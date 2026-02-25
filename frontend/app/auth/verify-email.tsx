@@ -17,7 +17,7 @@ import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
 import { useLanguage } from '../_contexts/LanguageContext';
 
-const CODE_LENGTH = 6;
+const CODE_LENGTH = 4;
 
 export default function VerifyEmailScreen() {
   const { palette } = useTheme();
