@@ -19,9 +19,11 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
+import { useLanguage } from './_contexts/LanguageContext';
 
 export default function AccountScreen() {
   const { palette } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated, signOut, updateProfile } = useAuth();
@@ -53,12 +55,12 @@ export default function AccountScreen() {
 
   const handleSignOut = () => {
     Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
+      t('account.signOut'),
+      t('account.signOutConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Sign Out',
+          text: t('account.signOut'),
           style: 'destructive',
           onPress: async () => {
             await signOut();
@@ -71,7 +73,7 @@ export default function AccountScreen() {
 
   const handleSaveProfile = async () => {
     if (!editName.trim()) {
-      Alert.alert('Error', 'Display name cannot be empty');
+      Alert.alert(t('common.error'), t('account.emptyNameError'));
       return;
     }
 
@@ -81,9 +83,9 @@ export default function AccountScreen() {
 
     if (result.success) {
       setIsEditing(false);
-      Alert.alert('Success', 'Profile updated');
+      Alert.alert(t('common.success'), t('account.profileUpdated'));
     } else {
-      Alert.alert('Error', result.error || 'Failed to update profile');
+      Alert.alert(t('common.error'), result.error || t('account.failedUpdate'));
     }
   };
 
@@ -98,10 +100,10 @@ export default function AccountScreen() {
 
   const providerLabel = (provider: string) => {
     switch (provider) {
-      case 'phone': return 'Phone Number';
-      case 'email': return 'Email';
-      case 'google': return 'Google';
-      default: return 'Unknown';
+      case 'phone': return t('account.phoneNumber');
+      case 'email': return t('account.email');
+      case 'google': return t('account.google');
+      default: return t('account.unknown');
     }
   };
 
@@ -402,30 +404,30 @@ export default function AccountScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.replace({ pathname: '/', params: { sidebar: '1' } })}>
             <Ionicons name="arrow-back" size={24} color={palette.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Account</Text>
+          <Text style={styles.headerTitle}>{t('account.title')}</Text>
         </View>
 
         <View style={styles.centeredContent}>
           <View style={styles.iconCircle}>
             <Ionicons name="person-outline" size={48} color={palette.textSubtle} />
           </View>
-          <Text style={styles.noAuthTitle}>No Account</Text>
+          <Text style={styles.noAuthTitle}>{t('account.noAccount')}</Text>
           <Text style={styles.noAuthSubtitle}>
-            Sign in or create an account to manage your profile
+            {t('account.signInOrCreate')}
           </Text>
 
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={() => router.push('/auth/signup')}
           >
-            <Text style={styles.primaryButtonText}>Sign Up</Text>
+            <Text style={styles.primaryButtonText}>{t('common.signUp')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
             onPress={() => router.push('/auth/signin')}
           >
-            <Text style={styles.secondaryButtonText}>Sign In</Text>
+            <Text style={styles.secondaryButtonText}>{t('common.signIn')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -445,7 +447,7 @@ export default function AccountScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.replace({ pathname: '/', params: { sidebar: '1' } })}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Account</Text>
+        <Text style={styles.headerTitle}>{t('account.title')}</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -463,23 +465,23 @@ export default function AccountScreen() {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials}</Text>
           </View>
-          <Text style={styles.displayName}>{user.display_name || 'User'}</Text>
+          <Text style={styles.displayName}>{user.display_name || t('account.user')}</Text>
           <View style={styles.providerBadge}>
             <Ionicons name={providerIcon(user.auth_provider)} size={14} color={palette.textSubtle} />
-            <Text style={styles.providerText}>Signed in with {providerLabel(user.auth_provider)}</Text>
+            <Text style={styles.providerText}>{t('account.signedInWith').replace('{provider}', providerLabel(user.auth_provider))}</Text>
           </View>
         </View>
 
         {/* Account Info */}
         <View style={styles.infoSection}>
-          <Text style={styles.sectionTitle}>Account Information</Text>
+          <Text style={styles.sectionTitle}>{t('account.accountInfo')}</Text>
           <View style={styles.infoCard}>
             {/* Phone - only for phone users */}
             {user.auth_provider === 'phone' && user.phone && (
               <View style={[styles.infoRow, styles.infoRowBorder]}>
                 <Ionicons name="call-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
                 <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Phone</Text>
+                  <Text style={styles.infoLabel}>{t('account.phone')}</Text>
                   <Text style={styles.infoValue}>{user.phone}</Text>
                 </View>
                 <View style={styles.verifiedBadge}>
@@ -489,7 +491,7 @@ export default function AccountScreen() {
                     color={user.is_phone_verified ? palette.success : palette.textSubtle}
                   />
                   <Text style={user.is_phone_verified ? styles.verifiedText : styles.unverifiedText}>
-                    {user.is_phone_verified ? 'Verified' : 'Unverified'}
+                    {user.is_phone_verified ? t('account.verified') : t('account.unverified')}
                   </Text>
                 </View>
               </View>
@@ -500,7 +502,7 @@ export default function AccountScreen() {
               <View style={[styles.infoRow, styles.infoRowBorder]}>
                 <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
                 <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoLabel}>{t('account.email')}</Text>
                   <Text style={styles.infoValue}>{user.email}</Text>
                 </View>
                 <View style={styles.verifiedBadge}>
@@ -510,7 +512,7 @@ export default function AccountScreen() {
                     color={user.is_email_verified ? palette.success : palette.textSubtle}
                   />
                   <Text style={user.is_email_verified ? styles.verifiedText : styles.unverifiedText}>
-                    {user.is_email_verified ? 'Verified' : 'Unverified'}
+                    {user.is_email_verified ? t('account.verified') : t('account.unverified')}
                   </Text>
                 </View>
               </View>
@@ -521,12 +523,12 @@ export default function AccountScreen() {
               <View style={[styles.infoRow, styles.infoRowBorder]}>
                 <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.infoIcon} />
                 <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Email</Text>
+                  <Text style={styles.infoLabel}>{t('account.email')}</Text>
                   <Text style={styles.infoValue}>{user.email}</Text>
                 </View>
                 <View style={styles.verifiedBadge}>
                   <Ionicons name="checkmark-circle" size={14} color={palette.success} />
-                  <Text style={styles.verifiedText}>Verified</Text>
+                  <Text style={styles.verifiedText}>{t('account.verified')}</Text>
                 </View>
               </View>
             )}
@@ -535,7 +537,7 @@ export default function AccountScreen() {
             <View style={styles.infoRow}>
               <Ionicons name={providerIcon(user.auth_provider)} size={20} color={palette.textSubtle} style={styles.infoIcon} />
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Sign-in Method</Text>
+                <Text style={styles.infoLabel}>{t('account.signInMethod')}</Text>
                 <Text style={styles.infoValue}>{providerLabel(user.auth_provider)}</Text>
               </View>
             </View>
@@ -544,16 +546,16 @@ export default function AccountScreen() {
 
         {/* Edit Profile */}
         <View style={styles.editSection}>
-          <Text style={styles.sectionTitle}>Edit Profile</Text>
+          <Text style={styles.sectionTitle}>{t('account.editProfile')}</Text>
           {isEditing ? (
             <View style={styles.editCard}>
-              <Text style={styles.editLabel}>Display Name</Text>
+              <Text style={styles.editLabel}>{t('account.displayName')}</Text>
               <TextInput
                 ref={inputRef}
                 style={styles.editInput}
                 value={editName}
                 onChangeText={setEditName}
-                placeholder="Your name"
+                placeholder={t('account.yourName')}
                 placeholderTextColor={palette.textSubtle}
               />
               <View style={styles.editButtons}>
@@ -564,13 +566,13 @@ export default function AccountScreen() {
                     setEditName(user.display_name || '');
                   }}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={styles.cancelButtonText}>{t('common.cancel')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile} disabled={isSaving}>
                   {isSaving ? (
                     <ActivityIndicator size="small" color={palette.buttonText} />
                   ) : (
-                    <Text style={styles.saveButtonText}>Save</Text>
+                    <Text style={styles.saveButtonText}>{t('common.save')}</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -584,7 +586,7 @@ export default function AccountScreen() {
               }}
             >
               <Ionicons name="create-outline" size={20} color={palette.textSubtle} />
-              <Text style={styles.actionButtonText}>Edit Display Name</Text>
+              <Text style={styles.actionButtonText}>{t('account.editDisplayName')}</Text>
               <Ionicons name="chevron-forward" size={18} color={palette.textSubtle} />
             </TouchableOpacity>
           )}
@@ -592,7 +594,7 @@ export default function AccountScreen() {
 
         {/* Actions */}
         <View style={styles.actionsSection}>
-          <Text style={styles.sectionTitle}>Actions</Text>
+          <Text style={styles.sectionTitle}>{t('account.actions')}</Text>
 
           {/* Verify phone - only for phone users */}
           {user.auth_provider === 'phone' && !user.is_phone_verified && (
@@ -601,7 +603,7 @@ export default function AccountScreen() {
               onPress={() => router.push({ pathname: '/auth/verify-phone', params: { phone: user.phone! } })}
             >
               <Ionicons name="shield-checkmark-outline" size={20} color={palette.textSubtle} />
-              <Text style={styles.actionButtonText}>Verify Phone Number</Text>
+              <Text style={styles.actionButtonText}>{t('account.verifyPhone')}</Text>
               <Ionicons name="chevron-forward" size={18} color={palette.textSubtle} />
             </TouchableOpacity>
           )}
@@ -613,7 +615,7 @@ export default function AccountScreen() {
               onPress={() => router.push({ pathname: '/auth/verify-email', params: { email: user.email } })}
             >
               <Ionicons name="shield-checkmark-outline" size={20} color={palette.textSubtle} />
-              <Text style={styles.actionButtonText}>Verify Email Address</Text>
+              <Text style={styles.actionButtonText}>{t('account.verifyEmail')}</Text>
               <Ionicons name="chevron-forward" size={18} color={palette.textSubtle} />
             </TouchableOpacity>
           )}
@@ -621,7 +623,7 @@ export default function AccountScreen() {
           {/* Sign Out */}
           <TouchableOpacity style={styles.signoutButton} onPress={handleSignOut}>
             <Ionicons name="log-out-outline" size={20} color={palette.danger} />
-            <Text style={styles.signoutButtonText}>Sign Out</Text>
+            <Text style={styles.signoutButtonText}>{t('account.signOut')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

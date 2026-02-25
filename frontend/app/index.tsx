@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
+import { useLanguage } from './_contexts/LanguageContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 const USER_ID_STORAGE_KEY = 'kwanya_user_id';
@@ -62,6 +63,7 @@ export default function KwanyaApp() {
   const params = useLocalSearchParams<{ sidebar?: string }>();
   const { user, isAuthenticated } = useAuth();
   const { palette, themePreference, setThemePreference } = useTheme();
+  const { t } = useLanguage();
 
   // State
   const [messages, setMessages] = useState<Message[]>([]);
@@ -72,7 +74,6 @@ export default function KwanyaApp() {
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
   const [sidebarMounted, setSidebarMounted] = useState(false);
@@ -139,16 +140,6 @@ export default function KwanyaApp() {
 
     initializeApp();
 
-    // Keyboard listeners
-    const keyboardDidShowListener = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      () => setKeyboardVisible(true),
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKeyboardVisible(false),
-    );
-
     return () => {
       if (recordingRef.current) {
         recordingRef.current.unloadAsync();
@@ -156,8 +147,6 @@ export default function KwanyaApp() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
     };
   }, [userId]);
 
@@ -232,7 +221,7 @@ export default function KwanyaApp() {
       return;
     }
     await Clipboard.setStringAsync(text);
-    Alert.alert('Copied', `${label} copied to clipboard.`);
+    Alert.alert(t('common.copied'), t('common.copiedMessage').replace('{label}', label));
   };
 
 
@@ -250,7 +239,7 @@ export default function KwanyaApp() {
       await loadConversationHistory();
     } catch (error) {
       console.error('Initialization error:', error);
-      Alert.alert('Error', 'Failed to initialize app. Please check permissions.');
+      Alert.alert(t('common.error'), t('chat.failedInitialize'));
     }
   };
 
@@ -311,7 +300,7 @@ export default function KwanyaApp() {
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
-      Alert.alert('Error', 'Failed to load conversation messages');
+      Alert.alert(t('common.error'), t('chat.failedLoadMessages'));
     }
   };
 
@@ -353,7 +342,7 @@ export default function KwanyaApp() {
     try {
       const { granted } = await Audio.getPermissionsAsync();
       if (!granted) {
-        Alert.alert('Permission required', 'Microphone permission is needed to record audio.');
+        Alert.alert(t('chat.permissionRequired'), t('chat.micPermission'));
         return;
       }
 
@@ -378,7 +367,7 @@ export default function KwanyaApp() {
 
     } catch (error) {
       console.error('Failed to start recording:', error);
-      Alert.alert('Error', 'Failed to start recording');
+      Alert.alert(t('common.error'), t('chat.failedStartRecording'));
     }
   };
 
@@ -412,7 +401,7 @@ export default function KwanyaApp() {
       setIsRecording(false);
       setRecording(null);
       setRecordingTime(0);
-      Alert.alert('Error', 'Failed to stop recording');
+      Alert.alert(t('common.error'), t('chat.failedStopRecording'));
     }
   };
 
@@ -472,30 +461,30 @@ export default function KwanyaApp() {
         const detail = axiosErr.response?.data?.detail || '';
         if (!isAuthenticated || detail.includes('Sign up')) {
           Alert.alert(
-            'Free Messages Used',
-            'Sign up to get 20 free credits and continue chatting!',
+            t('chat.freeMessagesUsed'),
+            t('chat.freeMessagesBody'),
             [
-              { text: 'Sign Up', onPress: () => router.push('/auth/signup') },
-              { text: 'Sign In', onPress: () => router.push('/auth/signin') },
-              { text: 'OK', style: 'cancel' },
+              { text: t('common.signUp'), onPress: () => router.push('/auth/signup') },
+              { text: t('common.signIn'), onPress: () => router.push('/auth/signin') },
+              { text: t('common.ok'), style: 'cancel' },
             ],
           );
         } else {
           Alert.alert(
-            'Insufficient Credits',
-            detail || 'You need more credits to send voice messages.',
+            t('chat.insufficientCredits'),
+            detail || t('chat.needMoreCreditsVoice'),
             [
-              { text: 'Buy Credits', onPress: () => router.push('/credits') },
-              { text: 'OK', style: 'cancel' },
+              { text: t('chat.buyCredits'), onPress: () => router.push('/credits') },
+              { text: t('common.ok'), style: 'cancel' },
             ],
           );
         }
       } else {
-        let msg = axiosErr.response?.data?.detail || 'Failed to transcribe audio';
+        let msg = axiosErr.response?.data?.detail || t('chat.failedTranscribe');
         if (status === 520 || status === 522 || status === 524) {
-          msg = 'Server is taking too long to respond. The speech model may still be loading — please try again in a moment.';
+          msg = t('chat.serverSlowMessage');
         }
-        Alert.alert('Error', msg);
+        Alert.alert(t('common.error'), msg);
       }
     } finally {
       setIsLoading(false);
@@ -520,7 +509,7 @@ export default function KwanyaApp() {
     if (!conversation) {
       setIsLoading(false);
       setInputText(messageText);
-      Alert.alert('Connection Error', 'Could not reach the server. Please check your internet connection and try again.');
+      Alert.alert(t('chat.connectionError'), t('chat.connectionErrorMessage'));
       return;
     }
 
@@ -593,26 +582,26 @@ export default function KwanyaApp() {
         const detail = axiosErr.response?.data?.detail || '';
         if (!isAuthenticated || detail.includes('Sign up')) {
           Alert.alert(
-            'Free Messages Used',
-            'Sign up to get 20 free credits and continue chatting!',
+            t('chat.freeMessagesUsed'),
+            t('chat.freeMessagesBody'),
             [
-              { text: 'Sign Up', onPress: () => router.push('/auth/signup') },
-              { text: 'Sign In', onPress: () => router.push('/auth/signin') },
-              { text: 'OK', style: 'cancel' },
+              { text: t('common.signUp'), onPress: () => router.push('/auth/signup') },
+              { text: t('common.signIn'), onPress: () => router.push('/auth/signin') },
+              { text: t('common.ok'), style: 'cancel' },
             ],
           );
         } else {
           Alert.alert(
-            'Insufficient Credits',
-            detail || 'You need more credits to continue chatting.',
+            t('chat.insufficientCredits'),
+            detail || t('chat.needMoreCreditsChat'),
             [
-              { text: 'Buy Credits', onPress: () => router.push('/credits') },
-              { text: 'OK', style: 'cancel' },
+              { text: t('chat.buyCredits'), onPress: () => router.push('/credits') },
+              { text: t('common.ok'), style: 'cancel' },
             ],
           );
         }
       } else {
-        Alert.alert('Error', axiosErr.response?.data?.detail || 'Failed to get response');
+        Alert.alert(t('common.error'), axiosErr.response?.data?.detail || t('chat.failedGetResponse'));
       }
     } finally {
       setIsLoading(false);
@@ -669,7 +658,7 @@ export default function KwanyaApp() {
       {isRecording && (
         <View style={styles.recordingIndicator}>
           <View style={styles.recordingDot} />
-          <Text style={styles.recordingText}>Recording</Text>
+          <Text style={styles.recordingText}>{t('chat.recording')}</Text>
           <Text style={styles.recordingText}>{formatTime(recordingTime)}</Text>
         </View>
       )}
@@ -677,7 +666,7 @@ export default function KwanyaApp() {
       <View style={styles.inputRow}>
         <TextInput
           style={styles.textInput}
-          placeholder="Type in Hausa..."
+          placeholder={t('chat.placeholder')}
           placeholderTextColor={palette.textSubtle}
           value={inputText}
           onChangeText={setInputText}
@@ -965,7 +954,7 @@ export default function KwanyaApp() {
     bottomInputContainer: {
       paddingHorizontal: 16,
       paddingVertical: 12,
-      paddingBottom: keyboardVisible ? 12 : Math.max(insets.bottom, 12),
+      paddingBottom: Math.max(insets.bottom, 12),
       backgroundColor: palette.bg,
       borderTopWidth: 1,
       borderTopColor: palette.border,
@@ -1033,7 +1022,7 @@ export default function KwanyaApp() {
     stopGeneratingButton: {
       padding: 6,
     },
-  }), [palette, insets, keyboardVisible]);
+  }), [palette, insets]);
 
   // Don't render until userId is loaded
   if (!userId) {
@@ -1073,7 +1062,7 @@ export default function KwanyaApp() {
           >
             {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
-              <Text style={styles.sidebarTitle}>Menu</Text>
+              <Text style={styles.sidebarTitle}>{t('chat.menu')}</Text>
               <Pressable hitSlop={8} onPress={() => setSidebarVisible(false)}>
                 <Ionicons name="close" size={28} color={palette.text} />
               </Pressable>
@@ -1082,7 +1071,7 @@ export default function KwanyaApp() {
             {/* New Chat Button */}
             <Pressable style={styles.newChatButton} onPress={startNewChat}>
               <Ionicons name="add-circle-outline" size={24} color={palette.text} />
-              <Text style={styles.newChatText}>New Chat</Text>
+              <Text style={styles.newChatText}>{t('chat.newChat')}</Text>
             </Pressable>
 
             {/* Menu Options */}
@@ -1096,7 +1085,7 @@ export default function KwanyaApp() {
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>Profile</Text>
+                <Text style={styles.menuOptionText}>{t('chat.profile')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
@@ -1109,7 +1098,7 @@ export default function KwanyaApp() {
                 }}
               >
                 <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>Credits</Text>
+                <Text style={styles.menuOptionText}>{t('chat.credits')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
@@ -1118,7 +1107,7 @@ export default function KwanyaApp() {
                 onPress={() => setThemeExpanded((prev) => !prev)}
               >
                 <Ionicons name="contrast-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>Theme</Text>
+                <Text style={styles.menuOptionText}>{t('chat.theme')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons
                   name={themeExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1128,7 +1117,7 @@ export default function KwanyaApp() {
               </Pressable>
               <Pressable style={styles.menuOption} onPress={() => router.push('/settings')}>
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>Settings</Text>
+                <Text style={styles.menuOptionText}>{t('chat.settings')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
               </Pressable>
@@ -1136,7 +1125,7 @@ export default function KwanyaApp() {
 
             {themeExpanded && (
               <View style={styles.themeSection}>
-                <Text style={styles.themeTitle}>Theme</Text>
+                <Text style={styles.themeTitle}>{t('chat.theme')}</Text>
                 <View style={styles.themeOptionsRow}>
                   <Pressable
                     style={[
@@ -1151,7 +1140,7 @@ export default function KwanyaApp() {
                         themePreference === 'light' && styles.themeOptionTextActive,
                       ]}
                     >
-                      Light Mode
+                      {t('chat.lightMode')}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -1167,7 +1156,7 @@ export default function KwanyaApp() {
                         themePreference === 'dark' && styles.themeOptionTextActive,
                       ]}
                     >
-                      Dark Mode
+                      {t('chat.darkMode')}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -1183,7 +1172,7 @@ export default function KwanyaApp() {
                         themePreference === 'system' && styles.themeOptionTextActive,
                       ]}
                     >
-                      System
+                      {t('chat.system')}
                     </Text>
                   </Pressable>
                 </View>
@@ -1193,11 +1182,11 @@ export default function KwanyaApp() {
             {/* Chat History */}
             <View style={styles.chatHistorySection}>
               <Text style={styles.chatHistoryTitle}>
-                Chat History
+                {t('chat.chatHistory')}
               </Text>
               {conversationHistory.length === 0 ? (
                 <Text style={styles.noChatText}>
-                  No previous chats
+                  {t('chat.noPreviousChats')}
                 </Text>
               ) : (
                 <FlatList
@@ -1215,12 +1204,12 @@ export default function KwanyaApp() {
                       onPress={() => loadConversation(conv)}
                       onLongPress={() => {
                         Alert.alert(
-                          'Delete Chat',
-                          `Delete "${conv.title || 'New Conversation'}"?`,
+                          t('chat.deleteChat'),
+                          t('chat.deleteChatConfirm').replace('{title}', conv.title || t('chat.newConversation')),
                           [
-                            { text: 'Cancel', style: 'cancel' },
+                            { text: t('common.cancel'), style: 'cancel' },
                             {
-                              text: 'Delete',
+                              text: t('common.delete'),
                               style: 'destructive',
                               onPress: async () => {
                                 try {
@@ -1231,7 +1220,7 @@ export default function KwanyaApp() {
                                     setMessages([]);
                                   }
                                 } catch {
-                                  Alert.alert('Error', 'Failed to delete conversation');
+                                  Alert.alert(t('common.error'), t('chat.failedDeleteConversation'));
                                 }
                               },
                             },
@@ -1251,18 +1240,18 @@ export default function KwanyaApp() {
                         ]}
                         numberOfLines={1}
                       >
-                        {conv.title || 'New Conversation'}
+                        {conv.title || t('chat.newConversation')}
                       </Text>
                       <Pressable
                         style={styles.chatDeleteButton}
                         onPress={() => {
                           Alert.alert(
-                            'Delete Chat',
-                            `Delete "${conv.title || 'New Conversation'}"?`,
+                            t('chat.deleteChat'),
+                            t('chat.deleteChatConfirm').replace('{title}', conv.title || t('chat.newConversation')),
                             [
-                              { text: 'Cancel', style: 'cancel' },
+                              { text: t('common.cancel'), style: 'cancel' },
                               {
-                                text: 'Delete',
+                                text: t('common.delete'),
                                 style: 'destructive',
                                 onPress: async () => {
                                   try {
@@ -1273,7 +1262,7 @@ export default function KwanyaApp() {
                                       setMessages([]);
                                     }
                                   } catch {
-                                    Alert.alert('Error', 'Failed to delete conversation');
+                                    Alert.alert(t('common.error'), t('chat.failedDeleteConversation'));
                                   }
                                 },
                               },
@@ -1297,8 +1286,8 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
-          keyboardVerticalOffset={insets.top}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
             <View style={styles.welcomeSection}>
@@ -1307,7 +1296,7 @@ export default function KwanyaApp() {
                 size={80}
                 color={palette.textSubtle}
               />
-              <Text style={styles.emptyText}>Barka da zuwa!</Text>
+              <Text style={styles.emptyText}>{t('chat.welcome')}</Text>
             </View>
           </Pressable>
 
@@ -1317,8 +1306,8 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
-          keyboardVerticalOffset={insets.top}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <FlatList
             ref={flatListRef}

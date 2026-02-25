@@ -11,14 +11,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   BackHandler,
+  Linking,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  WebView = require('react-native-webview').WebView;
+}
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import axios from 'axios';
 import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
+import { useLanguage } from './_contexts/LanguageContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 
@@ -33,6 +38,7 @@ const MIN_AMOUNT = 100;
 
 export default function CreditsScreen() {
   const { palette } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated, token } = useAuth();
@@ -101,8 +107,8 @@ export default function CreditsScreen() {
           setCheckoutUrl(null);
           setCurrentPaymentRef(null);
           Alert.alert(
-            'Payment Pending',
-            'We could not confirm your payment yet. If you completed the payment, your credits will be added shortly.',
+            t('credits.paymentPending'),
+            t('credits.paymentPendingMessage'),
           );
           return;
         }
@@ -116,7 +122,7 @@ export default function CreditsScreen() {
             setCheckoutUrl(null);
             setCurrentPaymentRef(null);
             await fetchBalance();
-            Alert.alert('Success', `${resp.data.credits} credits added to your balance!`);
+            Alert.alert(t('common.success'), t('credits.creditsAdded').replace('{count}', resp.data.credits.toString()));
           }
         } catch {
           // keep polling
@@ -128,9 +134,9 @@ export default function CreditsScreen() {
 
   const handleBuy = async (amount: number, credits: number) => {
     if (!isAuthenticated || !token) {
-      Alert.alert('Sign In Required', 'Please sign in to purchase credits.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign In', onPress: () => router.push('/auth/signin') },
+      Alert.alert(t('credits.signInRequired'), t('credits.signInToPurchase'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('common.signIn'), onPress: () => router.push('/auth/signin') },
       ]);
       return;
     }
@@ -143,13 +149,18 @@ export default function CreditsScreen() {
         { headers: authHeaders },
       );
       if (resp.data.success) {
-        setCheckoutUrl(resp.data.checkout_url);
         setCurrentPaymentRef(resp.data.payment_reference);
         startPolling(resp.data.payment_reference);
+        if (Platform.OS === 'web') {
+          // Open payment in new browser tab
+          window.open(resp.data.checkout_url, '_blank');
+        } else {
+          setCheckoutUrl(resp.data.checkout_url);
+        }
       }
     } catch (error: any) {
-      const msg = error.response?.data?.detail || 'Failed to initialize payment';
-      Alert.alert('Error', msg);
+      const msg = error.response?.data?.detail || t('credits.failedInitPayment');
+      Alert.alert(t('common.error'), msg);
     } finally {
       setIsLoading(false);
     }
@@ -165,6 +176,12 @@ export default function CreditsScreen() {
   const handleCloseCheckout = () => {
     setCheckoutUrl(null);
     // Polling continues in background
+  };
+
+  const handleCancelPayment = () => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    setCheckoutUrl(null);
+    setCurrentPaymentRef(null);
   };
 
   const styles = useMemo(
@@ -410,36 +427,63 @@ export default function CreditsScreen() {
           >
             <Ionicons name="arrow-back" size={24} color={palette.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Credits</Text>
+          <Text style={styles.headerTitle}>{t('credits.title')}</Text>
         </View>
         <View style={styles.centeredContent}>
           <View style={styles.iconCircle}>
             <Ionicons name="wallet-outline" size={48} color={palette.textSubtle} />
           </View>
-          <Text style={styles.noAuthTitle}>Sign In Required</Text>
+          <Text style={styles.noAuthTitle}>{t('credits.signInRequired')}</Text>
           <Text style={styles.noAuthSubtitle}>
-            Sign in or create an account to purchase and manage credits
+            {t('credits.signInOrCreate')}
           </Text>
           <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/auth/signup')}>
-            <Text style={styles.primaryButtonText}>Sign Up</Text>
+            <Text style={styles.primaryButtonText}>{t('common.signUp')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/auth/signin')}>
-            <Text style={styles.secondaryButtonText}>Sign In</Text>
+            <Text style={styles.secondaryButtonText}>{t('common.signIn')}</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  // WebView checkout overlay
-  if (checkoutUrl) {
+  // Web: show waiting screen while payment tab is open
+  if (Platform.OS === 'web' && currentPaymentRef && !checkoutUrl) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={handleCancelPayment}>
+            <Ionicons name="arrow-back" size={24} color={palette.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('credits.title')}</Text>
+        </View>
+        <View style={styles.centeredContent}>
+          <ActivityIndicator size="large" color={palette.button} style={{ marginBottom: 20 }} />
+          <Text style={styles.noAuthTitle}>{t('credits.completingPayment')}</Text>
+          <Text style={styles.noAuthSubtitle}>
+            {t('credits.completeInTab')}
+          </Text>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={handleCancelPayment}
+          >
+            <Text style={styles.secondaryButtonText}>{t('common.cancel')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Native: WebView checkout overlay
+  if (checkoutUrl && WebView) {
     return (
       <View style={styles.webviewContainer}>
         <View style={styles.webviewHeader}>
           <TouchableOpacity style={styles.backButton} onPress={handleCloseCheckout}>
             <Ionicons name="close" size={24} color={palette.text} />
           </TouchableOpacity>
-          <Text style={styles.webviewTitle}>Complete Payment</Text>
+          <Text style={styles.webviewTitle}>{t('credits.completePayment')}</Text>
         </View>
         <WebView
           source={{ uri: checkoutUrl }}
@@ -461,7 +505,7 @@ export default function CreditsScreen() {
         >
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Credits</Text>
+        <Text style={styles.headerTitle}>{t('credits.title')}</Text>
       </View>
 
       <KeyboardAvoidingView
@@ -482,13 +526,13 @@ export default function CreditsScreen() {
           >
             {showBalance ? (
               <>
-                <Text style={styles.balanceLabel}>Your Balance</Text>
+                <Text style={styles.balanceLabel}>{t('credits.yourBalance')}</Text>
                 <Text style={styles.balanceValue}>{balance.toLocaleString()}</Text>
-                <Text style={styles.balanceHint}>credits</Text>
+                <Text style={styles.balanceHint}>{t('credits.credits')}</Text>
               </>
             ) : (
               <>
-                <Text style={styles.balanceLabel}>Balance</Text>
+                <Text style={styles.balanceLabel}>{t('credits.balance')}</Text>
                 <View style={styles.barTrack}>
                   <View
                     style={[
@@ -498,7 +542,7 @@ export default function CreditsScreen() {
                   />
                 </View>
                 <Text style={styles.balanceHint}>
-                  {balance === 0 ? 'No credits remaining' : balance < 30 ? 'Running low' : 'Tap to view balance'}
+                  {balance === 0 ? t('credits.noCreditsRemaining') : balance < 30 ? t('credits.runningLow') : t('credits.tapToView')}
                 </Text>
               </>
             )}
@@ -506,7 +550,7 @@ export default function CreditsScreen() {
 
           {/* Preset Packs */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Buy Credits</Text>
+            <Text style={styles.sectionTitle}>{t('credits.buyCredits')}</Text>
             {CREDIT_PACKS.map((pack) => (
               <View key={pack.credits} style={styles.packCard}>
                 <View style={styles.packInfo}>
@@ -521,7 +565,7 @@ export default function CreditsScreen() {
                   {isLoading ? (
                     <ActivityIndicator size="small" color={palette.buttonText} />
                   ) : (
-                    <Text style={styles.buyButtonText}>Buy</Text>
+                    <Text style={styles.buyButtonText}>{t('common.buy')}</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -530,9 +574,9 @@ export default function CreditsScreen() {
 
           {/* Custom Amount */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Custom Amount</Text>
+            <Text style={styles.sectionTitle}>{t('credits.customAmount')}</Text>
             <View style={styles.customCard}>
-              <Text style={styles.customLabel}>Amount (NGN)</Text>
+              <Text style={styles.customLabel}>{t('credits.amountNGN')}</Text>
               <TextInput
                 style={styles.customInput}
                 value={customAmount}
@@ -543,7 +587,7 @@ export default function CreditsScreen() {
               />
               {customCredits > 0 && (
                 <Text style={styles.customCreditsText}>
-                  You'll get {customCredits.toLocaleString()} credits
+                  {t('credits.youllGet').replace('{count}', customCredits.toLocaleString())}
                 </Text>
               )}
               <TouchableOpacity
@@ -564,8 +608,8 @@ export default function CreditsScreen() {
                 ) : (
                   <Text style={styles.customBuyButtonText}>
                     {customCredits > 0
-                      ? `Buy ${customCredits.toLocaleString()} Credits`
-                      : 'Enter Amount'}
+                      ? t('credits.buyCount').replace('{count}', customCredits.toLocaleString())
+                      : t('credits.enterAmount')}
                   </Text>
                 )}
               </TouchableOpacity>

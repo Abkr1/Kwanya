@@ -8,17 +8,20 @@ import {
   KeyboardAvoidingView,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
+import { useLanguage } from '../_contexts/LanguageContext';
 
 const CODE_LENGTH = 6;
 
 export default function VerifyEmailScreen() {
   const { palette } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email: string }>();
@@ -65,7 +68,7 @@ export default function VerifyEmailScreen() {
   const handleVerify = async () => {
     const codeString = code.join('');
     if (codeString.length !== CODE_LENGTH) {
-      Alert.alert('Error', 'Please enter the complete verification code');
+      Alert.alert(t('common.error'), t('verifyEmail.incompleteCode'));
       return;
     }
 
@@ -74,11 +77,11 @@ export default function VerifyEmailScreen() {
     setIsLoading(false);
 
     if (result.success) {
-      Alert.alert('Verified', 'Email verified successfully!', [
-        { text: 'Continue', onPress: () => router.replace('/') },
+      Alert.alert(t('verifyEmail.verified'), t('verifyEmail.verifiedMessage'), [
+        { text: t('common.continue'), onPress: () => router.replace('/') },
       ]);
     } else {
-      Alert.alert('Verification Failed', result.error || 'Invalid code');
+      Alert.alert(t('verifyEmail.verificationFailed'), result.error || t('verifyEmail.invalidCode'));
     }
   };
 
@@ -88,9 +91,9 @@ export default function VerifyEmailScreen() {
     setIsResending(false);
 
     if (result.success) {
-      Alert.alert('Sent', 'A new verification code has been sent to your email');
+      Alert.alert(t('verifyEmail.sent'), t('verifyEmail.resentMessage'));
     } else {
-      Alert.alert('Error', result.error || 'Failed to resend code');
+      Alert.alert(t('common.error'), result.error || t('verifyEmail.failedResend'));
     }
   };
 
@@ -212,23 +215,23 @@ export default function VerifyEmailScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Verify Email</Text>
+        <Text style={styles.headerTitle}>{t('verifyEmail.title')}</Text>
       </View>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior="padding"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.content}>
           <View style={styles.iconCircle}>
             <Ionicons name="mail-open-outline" size={36} color={palette.text} />
           </View>
 
-          <Text style={styles.title}>Check Your Email</Text>
+          <Text style={styles.title}>{t('verifyEmail.checkEmail')}</Text>
           <Text style={styles.subtitle}>
-            We sent a verification code to
+            {t('verifyEmail.subtitle')}
           </Text>
-          <Text style={styles.emailText}>{email || 'your email'}</Text>
+          <Text style={styles.emailText}>{email || t('verifyEmail.fallback')}</Text>
 
           {/* Code Inputs */}
           <View style={styles.codeRow}>
@@ -256,15 +259,15 @@ export default function VerifyEmailScreen() {
             {isLoading ? (
               <ActivityIndicator size="small" color={palette.buttonText} />
             ) : (
-              <Text style={styles.verifyButtonText}>Verify</Text>
+              <Text style={styles.verifyButtonText}>{t('common.verify')}</Text>
             )}
           </TouchableOpacity>
 
           {/* Resend */}
           <TouchableOpacity style={styles.resendButton} onPress={handleResend} disabled={isResending}>
             <Text style={styles.resendText}>
-              Didn't receive the code?{' '}
-              <Text style={styles.resendTextBold}>{isResending ? 'Sending...' : 'Resend'}</Text>
+              {t('verifyEmail.didntReceive')}
+              <Text style={styles.resendTextBold}>{isResending ? t('common.sending') : t('common.resend')}</Text>
             </Text>
           </TouchableOpacity>
 

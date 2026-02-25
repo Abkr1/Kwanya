@@ -11,12 +11,14 @@ import {
   Alert,
   Modal,
   FlatList,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
+import { useLanguage } from '../_contexts/LanguageContext';
 
 type SigninMode = 'phone' | 'email';
 
@@ -57,6 +59,7 @@ const COUNTRY_CODES: CountryCode[] = [
 
 export default function SigninScreen() {
   const { palette } = useTheme();
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signIn } = useAuth();
@@ -83,19 +86,19 @@ export default function SigninScreen() {
     let identifier: string;
     if (mode === 'phone') {
       if (!phone.trim()) {
-        Alert.alert('Error', 'Please enter your phone number');
+        Alert.alert(t('common.error'), t('signin.enterPhone'));
         return;
       }
       identifier = selectedCountry.dial + phone.trim().replace(/^0+/, '');
     } else {
       if (!email.trim()) {
-        Alert.alert('Error', 'Please enter your email');
+        Alert.alert(t('common.error'), t('signin.enterEmail'));
         return;
       }
       identifier = email.trim();
     }
     if (!password.trim()) {
-      Alert.alert('Error', 'Please enter your password');
+      Alert.alert(t('common.error'), t('signin.enterPassword'));
       return;
     }
 
@@ -106,7 +109,7 @@ export default function SigninScreen() {
     if (result.success) {
       router.replace('/');
     } else {
-      Alert.alert('Sign In Failed', result.error || 'Invalid credentials');
+      Alert.alert(t('signin.signInFailed'), result.error || t('signin.invalidCredentials'));
     }
   };
 
@@ -362,12 +365,12 @@ export default function SigninScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Sign In</Text>
+        <Text style={styles.headerTitle}>{t('signin.title')}</Text>
       </View>
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior="padding"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           style={styles.scrollContent}
@@ -378,8 +381,8 @@ export default function SigninScreen() {
             <View style={styles.iconCircle}>
               <Ionicons name="log-in-outline" size={36} color={palette.text} />
             </View>
-            <Text style={styles.title}>Barka da dawowa</Text>
-            <Text style={styles.subtitle}>Sign in to your Kwanya account</Text>
+            <Text style={styles.title}>{t('signin.heading')}</Text>
+            <Text style={styles.subtitle}>{t('signin.subtitle')}</Text>
           </View>
 
           {/* Mode Toggle */}
@@ -389,7 +392,7 @@ export default function SigninScreen() {
               onPress={() => setMode('phone')}
             >
               <Text style={[styles.modeButtonText, mode === 'phone' && styles.modeButtonTextActive]}>
-                Phone Number
+                {t('signin.phoneNumber')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -397,7 +400,7 @@ export default function SigninScreen() {
               onPress={() => setMode('email')}
             >
               <Text style={[styles.modeButtonText, mode === 'email' && styles.modeButtonTextActive]}>
-                Email
+                {t('signin.emailTab')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -405,7 +408,7 @@ export default function SigninScreen() {
           {/* Phone or Email input */}
           {mode === 'phone' ? (
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Phone Number</Text>
+              <Text style={styles.inputLabel}>{t('signin.phoneNumber')}</Text>
               <View style={styles.phoneRow}>
                 <TouchableOpacity
                   style={styles.countryCodeButton}
@@ -428,7 +431,7 @@ export default function SigninScreen() {
             </View>
           ) : (
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address</Text>
+              <Text style={styles.inputLabel}>{t('signin.emailAddress')}</Text>
               <View style={styles.inputWrapper}>
                 <Ionicons name="mail-outline" size={20} color={palette.textSubtle} style={styles.inputIcon} />
                 <TextInput
@@ -447,12 +450,12 @@ export default function SigninScreen() {
 
           {/* Password */}
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password</Text>
+            <Text style={styles.inputLabel}>{t('signin.password')}</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="lock-closed-outline" size={20} color={palette.textSubtle} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Your password"
+                placeholder={t('signin.passwordPlaceholder')}
                 placeholderTextColor={palette.textSubtle}
                 value={password}
                 onChangeText={setPassword}
@@ -474,14 +477,14 @@ export default function SigninScreen() {
             {isLoading ? (
               <ActivityIndicator size="small" color={palette.buttonText} />
             ) : (
-              <Text style={styles.signinButtonText}>Sign In</Text>
+              <Text style={styles.signinButtonText}>{t('signin.title')}</Text>
             )}
           </TouchableOpacity>
 
           {/* Sign up link */}
           <TouchableOpacity style={styles.signupLink} onPress={() => router.replace('/auth/signup')}>
-            <Text style={styles.signupText}>Don't have an account? </Text>
-            <Text style={styles.signupTextBold}>Sign Up</Text>
+            <Text style={styles.signupText}>{t('signin.dontHaveAccount')}</Text>
+            <Text style={styles.signupTextBold}>{t('common.signUp')}</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -496,7 +499,7 @@ export default function SigninScreen() {
         <View style={styles.pickerOverlay}>
           <View style={styles.pickerContainer}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Select Country</Text>
+              <Text style={styles.pickerTitle}>{t('signin.selectCountry')}</Text>
               <TouchableOpacity onPress={() => {
                 setCountryPickerVisible(false);
                 setCountrySearch('');
@@ -507,7 +510,7 @@ export default function SigninScreen() {
             <View style={styles.pickerSearchWrapper}>
               <TextInput
                 style={styles.pickerSearchInput}
-                placeholder="Search country or code..."
+                placeholder={t('signin.searchCountry')}
                 placeholderTextColor={palette.textSubtle}
                 value={countrySearch}
                 onChangeText={setCountrySearch}
