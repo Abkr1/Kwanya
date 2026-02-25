@@ -17,7 +17,7 @@ import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
 import { useLanguage } from '../_contexts/LanguageContext';
 
-const OTP_LENGTH = 6;
+const OTP_LENGTH = 4;
 
 export default function VerifyPhoneScreen() {
   const { palette } = useTheme();
