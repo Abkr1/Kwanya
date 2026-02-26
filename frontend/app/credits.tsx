@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './_contexts/AuthContext';
 import { useTheme } from './_contexts/ThemeContext';
 import { useLanguage } from './_contexts/LanguageContext';
@@ -63,15 +64,29 @@ export default function CreditsScreen() {
     return Math.floor(amt / CREDIT_RATE);
   }, [customAmount]);
 
+  const CREDITS_BALANCE_CACHE_KEY = 'kwanya_credits_balance';
+
   const fetchBalance = useCallback(async () => {
     if (!token) return;
+
+    // 1. Show cached balance instantly
+    try {
+      const cached = await AsyncStorage.getItem(CREDITS_BALANCE_CACHE_KEY);
+      if (cached) setBalance(Number(cached));
+    } catch {}
+
+    // 2. Fetch fresh balance from server
     try {
       const resp = await axios.get(`${BACKEND_URL}/api/credits/balance`, {
         headers: authHeaders,
+        timeout: 10000,
       });
-      if (resp.data.success) setBalance(resp.data.credit_balance);
+      if (resp.data.success) {
+        setBalance(resp.data.credit_balance);
+        await AsyncStorage.setItem(CREDITS_BALANCE_CACHE_KEY, String(resp.data.credit_balance));
+      }
     } catch {
-      // silent
+      // silent — cached balance already shown
     }
   }, [token, authHeaders]);
 
