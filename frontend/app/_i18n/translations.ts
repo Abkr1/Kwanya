@@ -287,10 +287,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'chat.failedTranscribe': 'An kasa canza murya zuwa rubutu',
     'chat.freeMessagesUsed': 'An Gama Saƙonni Kyauta',
     'chat.freeMessagesBody': 'Yi rajista don samun kati 20 kyauta kuma ci gaba da hira!',
-    'chat.insufficientCredits': 'Kati Ba Su Isa Ba',
+    'chat.insufficientCredits': 'Kati Ya Kare',
     'chat.needMoreCreditsChat': 'Kuna buƙatar ƙarin kati don ci gaba da hira.',
     'chat.needMoreCreditsVoice': 'Kuna buƙatar ƙarin kati don aika saƙonnin murya.',
-    'chat.buyCredits': 'Sayi Kati',
+    'chat.buyCredits': 'Karo Kati',
 
     // Credits (credits.tsx)
     'credits.title': 'Kati',
@@ -300,7 +300,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'credits.noCreditsRemaining': 'Babu sauran kati',
     'credits.runningLow': 'Kati suna ƙarewa',
     'credits.tapToView': 'Matsa don ganin ragowa',
-    'credits.buyCredits': 'Sayi Kati',
+    'credits.buyCredits': 'Karo Kati',
     'credits.customAmount': 'Adadin da Kuke So',
     'credits.amountNGN': 'Adadi (NGN)',
     'credits.youllGet': 'Za ku samu kati {count}',

@@ -649,7 +649,20 @@ export default function KwanyaApp() {
           );
         }
       } else {
-        Alert.alert(t('common.error'), axiosErr.response?.data?.detail || t('chat.failedGetResponse'));
+        const detail = axiosErr.response?.data?.detail || '';
+        const isCreditsError = detail.toLowerCase().includes('credit') || detail.toLowerCase().includes('kati');
+        if (isCreditsError) {
+          Alert.alert(
+            t('chat.insufficientCredits'),
+            detail || t('chat.needMoreCreditsChat'),
+            [
+              { text: t('chat.buyCredits'), onPress: () => router.push('/credits') },
+              { text: t('common.ok'), style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(t('common.error'), detail || t('chat.failedGetResponse'));
+        }
       }
     } finally {
       setIsLoading(false);
