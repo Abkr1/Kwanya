@@ -798,15 +798,19 @@ Only use web search for questions that require real-time or up-to-date informati
 
         # Use Vertex AI if configured, otherwise fall back to API key
         sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
-        if sa_json or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+        sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
+        if sa_json or sa_b64 or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+            import json as _json
+            from google.oauth2 import service_account as _sa
             client_kwargs = {
                 "vertexai": True,
                 "project": os.environ.get('GCP_PROJECT_ID'),
                 "location": os.environ.get('GCP_LOCATION', 'us-central1'),
             }
+            if sa_b64:
+                import base64
+                sa_json = base64.b64decode(sa_b64).decode('utf-8')
             if sa_json:
-                import json as _json
-                from google.oauth2 import service_account as _sa
                 creds = _sa.Credentials.from_service_account_info(
                     _json.loads(sa_json),
                     scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -1842,7 +1846,8 @@ async def health_check():
         mongo_status = "disconnected"
 
     sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON', '')
-    use_vertex = bool(sa_json) or bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')) or bool(os.environ.get('GCP_USE_VERTEX'))
+    sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64', '')
+    use_vertex = bool(sa_json) or bool(sa_b64) or bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')) or bool(os.environ.get('GCP_USE_VERTEX'))
 
     return {
         "status": "healthy" if mongo_status == "connected" else "degraded",
@@ -1855,7 +1860,7 @@ async def health_check():
         "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
         "gemini_env_debug": {
             "has_sa_json": bool(sa_json),
-            "sa_json_len": len(sa_json),
+            "has_sa_b64": bool(sa_b64),
             "has_gcp_use_vertex": bool(os.environ.get('GCP_USE_VERTEX')),
             "has_gcp_project": bool(os.environ.get('GCP_PROJECT_ID')),
             "has_api_key": bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')),
