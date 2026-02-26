@@ -155,9 +155,10 @@ async def lifespan(app: FastAPI):
     # Log audio conversion backend
     logger.info(f"Audio conversion: {'ffmpeg' if HAS_FFMPEG else 'torchaudio (ffmpeg not found)'}")
 
-    # Preload Hausa ASR model in background thread so first request isn't slow
+    # Preload Hausa ASR model — wait for it to finish before accepting requests
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(asr_executor, load_hausa_asr)
+    await loop.run_in_executor(asr_executor, load_hausa_asr)
+    logger.info("ASR model ready, server accepting requests")
 
     yield
 
@@ -657,7 +658,7 @@ async def transcribe_audio(
         convert_audio_to_wav(temp_path, wav_path)
         logger.info(f"Audio converted to WAV successfully (using {'ffmpeg' if HAS_FFMPEG else 'torchaudio'})")
 
-        # Transcribe using Hausa ASR in thread pool (90s timeout to avoid Cloudflare 520)
+        # Transcribe using Hausa ASR in thread pool
         loop = asyncio.get_running_loop()
         try:
             transcribed_text = await asyncio.wait_for(
@@ -666,10 +667,10 @@ async def transcribe_audio(
                     transcribe_hausa_audio_sync,
                     wav_path
                 ),
-                timeout=90
+                timeout=120
             )
         except asyncio.TimeoutError:
-            raise Exception("Transcription timed out. The ASR model may still be loading — please try again.")
+            raise Exception("Transcription timed out. Please try a shorter recording.")
 
         # Save message to database
         message = Message(
@@ -794,19 +795,23 @@ You are friendly, knowledgeable, and culturally aware of West African contexts, 
 Respond naturally in Hausa language and provide detailed, helpful responses.
 Do not introduce yourself or mention your name; answer directly.
 When asked religious questions (about theology, religious rulings, tafsir, fiqh, or religious debates), politely decline to answer in detail and advise the user to consult qualified religious scholars (malamai) for proper guidance. However, you firmly maintain that Islam is the true religion (addinin gaskiya).
-Only use web search for questions that require real-time or up-to-date information (e.g., current news, today's weather, live scores, recent events, current prices). For general knowledge, educational topics, language help, and conversational questions, use your own knowledge base without searching the web."""
+Only use web search for questions that require real-time or up-to-date information (e.g., current news, today's weather, live scores, recent events, current prices, exchange rates, stock prices, crypto prices, commodity prices, and any financial or market data). For general knowledge, educational topics, language help, and conversational questions, use your own knowledge base without searching the web."""
 
         # Use Vertex AI if configured, otherwise fall back to API key
         sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
-        if sa_json or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+        sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
+        if sa_json or sa_b64 or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+            import json as _json
+            from google.oauth2 import service_account as _sa
             client_kwargs = {
                 "vertexai": True,
                 "project": os.environ.get('GCP_PROJECT_ID'),
                 "location": os.environ.get('GCP_LOCATION', 'us-central1'),
             }
+            if sa_b64:
+                import base64
+                sa_json = base64.b64decode(sa_b64).decode('utf-8')
             if sa_json:
-                import json as _json
-                from google.oauth2 import service_account as _sa
                 creds = _sa.Credentials.from_service_account_info(
                     _json.loads(sa_json),
                     scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -1663,6 +1668,7 @@ async def verify_payment(
 
         body = monnify_data.get("responseBody", {})
         payment_status = body.get("paymentStatus", "")
+        logger.info(f"Monnify verify ref={payment_reference}: status={payment_status}, amountPaid={body.get('amountPaid')}, response={monnify_data.get('responseMessage')}")
 
         if payment_status == "PAID" and body.get("amountPaid", 0) >= transaction["amount"]:
             # Atomically credit user (idempotent via pending filter)
@@ -1680,7 +1686,7 @@ async def verify_payment(
         return {"success": True, "status": "pending"}
 
     except Exception as e:
-        logger.error(f"Monnify verify error: {str(e)}")
+        logger.error(f"Monnify verify error for ref={payment_reference}: {str(e)}")
         return {"success": True, "status": "pending"}
 
 
@@ -1841,15 +1847,26 @@ async def health_check():
     except Exception:
         mongo_status = "disconnected"
 
+    sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON', '')
+    sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64', '')
+    use_vertex = bool(sa_json) or bool(sa_b64) or bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')) or bool(os.environ.get('GCP_USE_VERTEX'))
+
     return {
         "status": "healthy" if mongo_status == "connected" else "degraded",
         "services": {
             "mongodb": mongo_status,
             "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
-            "gemini": "configured (Vertex AI)" if (os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX')) else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
+            "gemini": "configured (Vertex AI)" if use_vertex else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
             "audio_converter": "ffmpeg" if HAS_FFMPEG else "torchaudio",
         },
         "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
+        "gemini_env_debug": {
+            "has_sa_json": bool(sa_json),
+            "has_sa_b64": bool(sa_b64),
+            "has_gcp_use_vertex": bool(os.environ.get('GCP_USE_VERTEX')),
+            "has_gcp_project": bool(os.environ.get('GCP_PROJECT_ID')),
+            "has_api_key": bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')),
+        },
     }
 
 
