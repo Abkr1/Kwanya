@@ -708,6 +708,10 @@ export default function KwanyaApp() {
   // Extracted InputArea to avoid duplication
   const renderInputArea = (containerStyle: object) => (
     <View style={containerStyle}>
+      {isLoading && !isRecording && (
+        <Text style={styles.thinkingText}>{t('chat.thinking')}</Text>
+      )}
+
       {isRecording && (
         <View style={styles.recordingIndicator}>
           <View style={styles.recordingDot} />
@@ -1011,6 +1015,13 @@ export default function KwanyaApp() {
       backgroundColor: palette.bg,
       borderTopWidth: 1,
       borderTopColor: palette.border,
+    },
+    thinkingText: {
+      fontSize: 13,
+      color: palette.textSubtle,
+      paddingHorizontal: 4,
+      paddingBottom: 6,
+      fontStyle: 'italic',
     },
     recordingIndicator: {
       flexDirection: 'row',
