@@ -1667,6 +1667,7 @@ async def verify_payment(
 
         body = monnify_data.get("responseBody", {})
         payment_status = body.get("paymentStatus", "")
+        logger.info(f"Monnify verify ref={payment_reference}: status={payment_status}, amountPaid={body.get('amountPaid')}, response={monnify_data.get('responseMessage')}")
 
         if payment_status == "PAID" and body.get("amountPaid", 0) >= transaction["amount"]:
             # Atomically credit user (idempotent via pending filter)
@@ -1684,7 +1685,7 @@ async def verify_payment(
         return {"success": True, "status": "pending"}
 
     except Exception as e:
-        logger.error(f"Monnify verify error: {str(e)}")
+        logger.error(f"Monnify verify error for ref={payment_reference}: {str(e)}")
         return {"success": True, "status": "pending"}
 
 

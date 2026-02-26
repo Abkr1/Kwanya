@@ -117,7 +117,7 @@ export default function CreditsScreen() {
       pollCountRef.current = 0;
       pollTimerRef.current = setInterval(async () => {
         pollCountRef.current += 1;
-        if (pollCountRef.current > 40) {
+        if (pollCountRef.current > 100) {
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
           setCheckoutUrl(null);
           setCurrentPaymentRef(null);
