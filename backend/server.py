@@ -1841,15 +1841,25 @@ async def health_check():
     except Exception:
         mongo_status = "disconnected"
 
+    sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON', '')
+    use_vertex = bool(sa_json) or bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')) or bool(os.environ.get('GCP_USE_VERTEX'))
+
     return {
         "status": "healthy" if mongo_status == "connected" else "degraded",
         "services": {
             "mongodb": mongo_status,
             "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
-            "gemini": "configured (Vertex AI)" if (os.environ.get('GCP_SERVICE_ACCOUNT_JSON') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX')) else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
+            "gemini": "configured (Vertex AI)" if use_vertex else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
             "audio_converter": "ffmpeg" if HAS_FFMPEG else "torchaudio",
         },
         "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
+        "gemini_env_debug": {
+            "has_sa_json": bool(sa_json),
+            "sa_json_len": len(sa_json),
+            "has_gcp_use_vertex": bool(os.environ.get('GCP_USE_VERTEX')),
+            "has_gcp_project": bool(os.environ.get('GCP_PROJECT_ID')),
+            "has_api_key": bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')),
+        },
     }
 
 
