@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
+  ScrollView,
   ActivityIndicator,
   Alert,
   Platform,
@@ -221,8 +222,9 @@ export default function VerifyPhoneScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
           <View style={styles.iconCircle}>
             <Ionicons name="shield-checkmark-outline" size={36} color={palette.text} />
@@ -273,6 +275,7 @@ export default function VerifyPhoneScreen() {
           </TouchableOpacity>
 
         </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
