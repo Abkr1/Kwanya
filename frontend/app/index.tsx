@@ -30,6 +30,8 @@ import { useLanguage } from './_contexts/LanguageContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 const USER_ID_STORAGE_KEY = 'kwanya_user_id';
+const CONVERSATIONS_CACHE_KEY = 'kwanya_conversations_cache';
+const CREDITS_BALANCE_CACHE_KEY = 'kwanya_credits_balance';
 
 interface Message {
   id: string;
@@ -102,12 +104,24 @@ export default function KwanyaApp() {
     prevAuthRef.current = isAuthenticated;
 
     const loadOrCreateUserId = async () => {
-      // On logout: clear chat state immediately and generate fresh anonymous ID
+      // On logout: clear chat state and caches, generate fresh anonymous ID
       if (wasAuthenticated && !isAuthenticated) {
         setMessages([]);
         setCurrentConversation(null);
         setConversationHistory([]);
         creatingConversationRef.current = null;
+
+        // Clear conversation and message caches
+        try {
+          const cachedConvs = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+          const keysToRemove = [CONVERSATIONS_CACHE_KEY, CREDITS_BALANCE_CACHE_KEY];
+          if (cachedConvs) {
+            const convs = JSON.parse(cachedConvs);
+            convs.forEach((c: { id: string }) => keysToRemove.push(`kwanya_messages_${c.id}`));
+          }
+          await AsyncStorage.multiRemove(keysToRemove);
+        } catch {}
+
         const freshId = 'anon-' + Date.now();
         await AsyncStorage.setItem(USER_ID_STORAGE_KEY, freshId);
         setUserId(freshId);
@@ -271,10 +285,20 @@ export default function KwanyaApp() {
   };
 
   const loadConversationHistory = async () => {
+    // 1. Show cached data instantly
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/conversations/${userId}`);
+      const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+      if (cached) {
+        setConversationHistory(JSON.parse(cached));
+      }
+    } catch {}
+
+    // 2. Fetch fresh data from server
+    try {
+      const response = await axios.get(`${BACKEND_URL}/api/conversations/${userId}`, { timeout: 10000 });
       if (response.data.success) {
         setConversationHistory(response.data.conversations);
+        await AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(response.data.conversations));
       }
     } catch (error) {
       console.error('Failed to load conversation history:', error);
@@ -292,15 +316,32 @@ export default function KwanyaApp() {
   const loadConversation = async (conversation: Conversation) => {
     setSidebarVisible(false);
     setCurrentConversation(conversation);
+
+    // 1. Show cached messages instantly
+    let hasCached = false;
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/conversations/${conversation.id}/messages`);
+      const cached = await AsyncStorage.getItem(`kwanya_messages_${conversation.id}`);
+      if (cached) {
+        const cachedMessages = JSON.parse(cached);
+        setMessages(cachedMessages);
+        hasCached = cachedMessages.length > 0;
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
+      }
+    } catch {}
+
+    // 2. Fetch fresh messages from server
+    try {
+      const response = await axios.get(`${BACKEND_URL}/api/conversations/${conversation.id}/messages`, { timeout: 10000 });
       if (response.data.success) {
         setMessages(response.data.messages);
+        await AsyncStorage.setItem(`kwanya_messages_${conversation.id}`, JSON.stringify(response.data.messages));
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 200);
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
-      Alert.alert(t('common.error'), t('chat.failedLoadMessages'));
+      if (!hasCached) {
+        Alert.alert(t('common.error'), t('chat.failedLoadMessages'));
+      }
     }
   };
 
@@ -568,7 +609,14 @@ export default function KwanyaApp() {
           timestamp: new Date().toISOString(),
         };
 
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessages((prev) => {
+          const updated = [...prev, assistantMessage];
+          // Cache messages in background
+          if (activeConversation) {
+            AsyncStorage.setItem(`kwanya_messages_${activeConversation.id}`, JSON.stringify(updated)).catch(() => {});
+          }
+          return updated;
+        });
       }
 
     } catch (error) {

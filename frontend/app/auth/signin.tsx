@@ -70,8 +70,7 @@ export default function SigninScreen() {
   const [selectedCountry, setSelectedCountry] = useState<CountryCode>(COUNTRY_CODES[0]);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -98,13 +97,13 @@ export default function SigninScreen() {
       }
       identifier = email.trim();
     }
-    if (!password.trim()) {
+    if (!pin.trim()) {
       Alert.alert(t('common.error'), t('signin.enterPassword'));
       return;
     }
 
     setIsLoading(true);
-    const result = await signIn(identifier, password);
+    const result = await signIn(identifier, pin);
     setIsLoading(false);
 
     if (result.success) {
@@ -220,9 +219,6 @@ export default function SigninScreen() {
       height: 48,
       fontSize: 16,
       color: palette.text,
-    },
-    passwordToggle: {
-      padding: 4,
     },
     phoneRow: {
       flexDirection: 'row',
@@ -459,7 +455,7 @@ export default function SigninScreen() {
             </View>
           )}
 
-          {/* Password */}
+          {/* PIN */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>{t('signin.password')}</Text>
             <View style={styles.inputWrapper}>
@@ -468,17 +464,15 @@ export default function SigninScreen() {
                 style={styles.input}
                 placeholder={t('signin.passwordPlaceholder')}
                 placeholderTextColor={palette.textSubtle}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
+                value={pin}
+                onChangeText={setPin}
+                secureTextEntry
+                keyboardType="number-pad"
+                maxLength={4}
                 onFocus={() => {
                   setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 300);
                 }}
               />
-              <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
-                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={palette.textSubtle} />
-              </TouchableOpacity>
             </View>
           </View>
 

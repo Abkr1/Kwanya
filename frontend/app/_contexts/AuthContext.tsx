@@ -65,12 +65,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (response.data.success) {
               setToken(storedToken);
               setUser(response.data.user);
+              await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(response.data.user));
             } else {
               await clearAuth();
             }
           } catch {
-            // Token expired or invalid - clear stored auth
-            await clearAuth();
+            // Network error — trust cached data instead of logging out
+            setToken(storedToken);
+            setUser(JSON.parse(storedUser));
           }
         }
       } catch (error) {

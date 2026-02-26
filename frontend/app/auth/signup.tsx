@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -70,9 +70,9 @@ export default function SignupScreen() {
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [pin, setPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const filteredCountries = useMemo(() => {
     if (!countrySearch.trim()) return COUNTRY_CODES;
@@ -87,14 +87,14 @@ export default function SignupScreen() {
       Alert.alert(t('common.error'), t('signup.enterPhone'));
       return;
     }
-    if (!password.trim() || password.length < 6) {
+    if (!/^\d{4}$/.test(pin)) {
       Alert.alert(t('common.error'), t('signup.passwordMinLength'));
       return;
     }
 
     setIsLoading(true);
     const fullPhone = selectedCountry.dial + phone.trim().replace(/^0+/, '');
-    const result = await signUpWithPhone(fullPhone, password);
+    const result = await signUpWithPhone(fullPhone, pin);
     setIsLoading(false);
 
     if (result.success) {
@@ -109,13 +109,13 @@ export default function SignupScreen() {
       Alert.alert(t('common.error'), t('signup.enterEmail'));
       return;
     }
-    if (!password.trim() || password.length < 6) {
+    if (!/^\d{4}$/.test(pin)) {
       Alert.alert(t('common.error'), t('signup.passwordMinLength'));
       return;
     }
 
     setIsLoading(true);
-    const result = await signUpWithEmail(email.trim(), password);
+    const result = await signUpWithEmail(email.trim(), pin);
     setIsLoading(false);
 
     if (result.success) {
@@ -239,9 +239,6 @@ export default function SignupScreen() {
       height: 48,
       fontSize: 16,
       color: palette.text,
-    },
-    passwordToggle: {
-      padding: 4,
     },
     signupButton: {
       backgroundColor: palette.button,
@@ -422,10 +419,12 @@ export default function SignupScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
+          ref={scrollViewRef}
           style={styles.scrollContent}
+          contentContainerStyle={{ flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -500,7 +499,7 @@ export default function SignupScreen() {
             </View>
           )}
 
-          {/* Password */}
+          {/* PIN */}
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>{t('signup.password')}</Text>
             <View style={styles.inputWrapper}>
@@ -509,14 +508,15 @@ export default function SignupScreen() {
                 style={styles.input}
                 placeholder={t('signup.passwordPlaceholder')}
                 placeholderTextColor={palette.textSubtle}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
+                value={pin}
+                onChangeText={setPin}
+                secureTextEntry
+                keyboardType="number-pad"
+                maxLength={4}
+                onFocus={() => {
+                  setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 300);
+                }}
               />
-              <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
-                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={palette.textSubtle} />
-              </TouchableOpacity>
             </View>
           </View>
 

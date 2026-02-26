@@ -18,7 +18,7 @@ import { useAuth } from '../_contexts/AuthContext';
 import { useTheme } from '../_contexts/ThemeContext';
 import { useLanguage } from '../_contexts/LanguageContext';
 
-const CODE_LENGTH = 4;
+const CODE_LENGTH = 6;
 
 export default function ResetPasswordScreen() {
   const { palette } = useTheme();
@@ -29,8 +29,7 @@ export default function ResetPasswordScreen() {
   const { resetPassword, requestPasswordReset } = useAuth();
 
   const [code, setCode] = useState<string[]>(new Array(CODE_LENGTH).fill(''));
-  const [newPassword, setNewPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [newPin, setNewPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const inputRefs = useRef<(TextInput | null)[]>([]);
@@ -74,13 +73,13 @@ export default function ResetPasswordScreen() {
       Alert.alert(t('common.error'), t('resetPassword.incompleteCode'));
       return;
     }
-    if (!newPassword.trim() || newPassword.length < 6) {
+    if (!/^\d{4}$/.test(newPin)) {
       Alert.alert(t('common.error'), t('resetPassword.passwordMinLength'));
       return;
     }
 
     setIsLoading(true);
-    const result = await resetPassword(identifier || '', codeString, newPassword);
+    const result = await resetPassword(identifier || '', codeString, newPin);
     setIsLoading(false);
 
     if (result.success) {
@@ -217,9 +216,6 @@ export default function ResetPasswordScreen() {
       fontSize: 16,
       color: palette.text,
     },
-    passwordToggle: {
-      padding: 4,
-    },
     resetButton: {
       backgroundColor: palette.button,
       borderRadius: 12,
@@ -294,7 +290,7 @@ export default function ResetPasswordScreen() {
               ))}
             </View>
 
-            {/* New Password */}
+            {/* New PIN */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>{t('resetPassword.newPassword')}</Text>
               <View style={styles.inputWrapper}>
@@ -303,14 +299,12 @@ export default function ResetPasswordScreen() {
                   style={styles.input}
                   placeholder={t('resetPassword.passwordPlaceholder')}
                   placeholderTextColor={palette.textSubtle}
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
+                  value={newPin}
+                  onChangeText={setNewPin}
+                  secureTextEntry
+                  keyboardType="number-pad"
+                  maxLength={4}
                 />
-                <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
-                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={palette.textSubtle} />
-                </TouchableOpacity>
               </View>
             </View>
 
