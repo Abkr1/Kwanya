@@ -155,9 +155,10 @@ async def lifespan(app: FastAPI):
     # Log audio conversion backend
     logger.info(f"Audio conversion: {'ffmpeg' if HAS_FFMPEG else 'torchaudio (ffmpeg not found)'}")
 
-    # Preload Hausa ASR model in background thread so first request isn't slow
+    # Preload Hausa ASR model — wait for it to finish before accepting requests
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(asr_executor, load_hausa_asr)
+    await loop.run_in_executor(asr_executor, load_hausa_asr)
+    logger.info("ASR model ready, server accepting requests")
 
     yield
 
@@ -657,7 +658,7 @@ async def transcribe_audio(
         convert_audio_to_wav(temp_path, wav_path)
         logger.info(f"Audio converted to WAV successfully (using {'ffmpeg' if HAS_FFMPEG else 'torchaudio'})")
 
-        # Transcribe using Hausa ASR in thread pool (90s timeout to avoid Cloudflare 520)
+        # Transcribe using Hausa ASR in thread pool
         loop = asyncio.get_running_loop()
         try:
             transcribed_text = await asyncio.wait_for(
@@ -666,10 +667,10 @@ async def transcribe_audio(
                     transcribe_hausa_audio_sync,
                     wav_path
                 ),
-                timeout=90
+                timeout=120
             )
         except asyncio.TimeoutError:
-            raise Exception("Transcription timed out. The ASR model may still be loading — please try again.")
+            raise Exception("Transcription timed out. Please try a shorter recording.")
 
         # Save message to database
         message = Message(
