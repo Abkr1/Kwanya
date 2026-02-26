@@ -1364,6 +1364,18 @@ export default function KwanyaApp() {
             </View>
           </Pressable>
 
+          {/* Stop Button */}
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <Pressable
+                style={styles.stopGeneratingButton}
+                onPress={stopGenerating}
+              >
+                <Ionicons name="stop-circle" size={24} color={palette.text} />
+              </Pressable>
+            </View>
+          )}
+
           {renderInputArea(styles.bottomInputContainer)}
         </KeyboardAvoidingView>
       ) : (
