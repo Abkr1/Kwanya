@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
+  ScrollView,
   ActivityIndicator,
   Alert,
   Platform,
@@ -220,8 +221,10 @@ export default function VerifyEmailScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={insets.top}
       >
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
           <View style={styles.iconCircle}>
             <Ionicons name="mail-open-outline" size={36} color={palette.text} />
@@ -272,6 +275,7 @@ export default function VerifyEmailScreen() {
           </TouchableOpacity>
 
         </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );

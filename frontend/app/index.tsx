@@ -479,14 +479,6 @@ export default function KwanyaApp() {
         const transcribedText = response.data.transcription;
         const isFirstMessage = messages.length === 0;
 
-        const userMessage: Message = {
-          id: response.data.message_id,
-          role: 'user',
-          content: transcribedText,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, userMessage]);
-
         if (isFirstMessage) {
           await autoNameConversation(conversation.id, transcribedText);
         }
@@ -649,7 +641,20 @@ export default function KwanyaApp() {
           );
         }
       } else {
-        Alert.alert(t('common.error'), axiosErr.response?.data?.detail || t('chat.failedGetResponse'));
+        const detail = axiosErr.response?.data?.detail || '';
+        const isCreditsError = detail.toLowerCase().includes('credit') || detail.toLowerCase().includes('kati');
+        if (isCreditsError) {
+          Alert.alert(
+            t('chat.insufficientCredits'),
+            detail || t('chat.needMoreCreditsChat'),
+            [
+              { text: t('chat.buyCredits'), onPress: () => router.push('/credits') },
+              { text: t('common.ok'), style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(t('common.error'), detail || t('chat.failedGetResponse'));
+        }
       }
     } finally {
       setIsLoading(false);
@@ -703,6 +708,10 @@ export default function KwanyaApp() {
   // Extracted InputArea to avoid duplication
   const renderInputArea = (containerStyle: object) => (
     <View style={containerStyle}>
+      {isLoading && !isRecording && (
+        <Text style={styles.thinkingText}>{t('chat.thinking')}</Text>
+      )}
+
       {isRecording && (
         <View style={styles.recordingIndicator}>
           <View style={styles.recordingDot} />
@@ -1006,6 +1015,13 @@ export default function KwanyaApp() {
       backgroundColor: palette.bg,
       borderTopWidth: 1,
       borderTopColor: palette.border,
+    },
+    thinkingText: {
+      fontSize: 13,
+      color: palette.textSubtle,
+      paddingHorizontal: 4,
+      paddingBottom: 6,
+      fontStyle: 'italic',
     },
     recordingIndicator: {
       flexDirection: 'row',
