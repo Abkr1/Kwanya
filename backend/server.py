@@ -796,7 +796,27 @@ Do not introduce yourself or mention your name; answer directly.
 When asked religious questions (about theology, religious rulings, tafsir, fiqh, or religious debates), politely decline to answer in detail and advise the user to consult qualified religious scholars (malamai) for proper guidance. However, you firmly maintain that Islam is the true religion (addinin gaskiya).
 Only use web search for questions that require real-time or up-to-date information (e.g., current news, today's weather, live scores, recent events, current prices). For general knowledge, educational topics, language help, and conversational questions, use your own knowledge base without searching the web."""
 
-        gemini_client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'))
+        # Use Vertex AI if configured, otherwise fall back to API key
+        sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
+        if sa_json or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+            client_kwargs = {
+                "vertexai": True,
+                "project": os.environ.get('GCP_PROJECT_ID'),
+                "location": os.environ.get('GCP_LOCATION', 'us-central1'),
+            }
+            if sa_json:
+                import json as _json
+                from google.oauth2 import service_account as _sa
+                creds = _sa.Credentials.from_service_account_info(
+                    _json.loads(sa_json),
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+                client_kwargs["credentials"] = creds
+            gemini_client = genai.Client(**client_kwargs)
+        else:
+            gemini_client = genai.Client(
+                api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'),
+            )
 
         # Build history from previous messages (exclude the current user message)
         history = []
@@ -1826,7 +1846,7 @@ async def health_check():
         "services": {
             "mongodb": mongo_status,
             "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
-            "gemini": "configured" if os.environ.get('EMERGENT_LLM_KEY') else "not configured",
+            "gemini": "configured (Vertex AI)" if (os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX')) else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
             "audio_converter": "ffmpeg" if HAS_FFMPEG else "torchaudio",
         },
         "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
