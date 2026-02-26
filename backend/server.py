@@ -364,6 +364,11 @@ def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 
+def is_valid_pin(pin: str) -> bool:
+    """Check if PIN is exactly 4 digits"""
+    return bool(re.fullmatch(r'\d{4}', pin))
+
+
 def create_token(user_id: str) -> str:
     payload = {
         "sub": user_id,
@@ -415,8 +420,8 @@ def generate_email_from_phone(phone: str) -> str:
 
 
 def generate_otp() -> str:
-    """Generate a 4-digit OTP"""
-    return f"{secrets.randbelow(10000):04d}"
+    """Generate a 6-digit OTP"""
+    return f"{secrets.randbelow(1000000):06d}"
 
 
 async def send_sms_otp(phone: str) -> Optional[str]:
@@ -445,9 +450,9 @@ async def send_sms_otp(phone: str) -> Optional[str]:
                     "channel": option["channel"],
                     "pin_attempts": 3,
                     "pin_time_to_live": 5,
-                    "pin_length": 4,
-                    "pin_placeholder": "< 1234 >",
-                    "message_text": "Your Kwanya verification code is < 1234 >. It expires in 5 minutes.",
+                    "pin_length": 6,
+                    "pin_placeholder": "< 123456 >",
+                    "message_text": "Your Kwanya verification code is < 123456 >. It expires in 5 minutes.",
                     "pin_type": "NUMERIC",
                 }
                 resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json=payload)
@@ -508,9 +513,9 @@ async def debug_test_sms(phone: str):
                 "channel": "generic",
                 "pin_attempts": 3,
                 "pin_time_to_live": 5,
-                "pin_length": 4,
-                "pin_placeholder": "< 1234 >",
-                "message_text": "Your Kwanya code is < 1234 >",
+                "pin_length": 6,
+                "pin_placeholder": "< 123456 >",
+                "message_text": "Your Kwanya code is < 123456 >",
                 "pin_type": "NUMERIC",
             })
             results["token_otp_termii_sender"] = {"status": token_resp.status_code, "body": token_resp.json()}
@@ -947,8 +952,8 @@ async def signup_with_phone(request: PhoneSignupRequest):
     if len(clean_phone) < 10:
         raise HTTPException(status_code=400, detail="Invalid phone number")
 
-    if len(request.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if not is_valid_pin(request.password):
+        raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits")
 
     # Check if phone already exists
     existing = await db.users.find_one({"phone": clean_phone})
@@ -1000,8 +1005,8 @@ async def signup_with_phone(request: PhoneSignupRequest):
 @auth_router.post("/signup/email")
 async def signup_with_email(request: EmailSignupRequest):
     """Sign up with email and password"""
-    if len(request.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if not is_valid_pin(request.password):
+        raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits")
 
     # Check if email already exists
     existing = await db.users.find_one({"email": request.email.lower()})
@@ -1096,11 +1101,29 @@ async def signup_with_google(request: GoogleSignupRequest):
 
 @auth_router.post("/signin")
 async def signin(request: SigninRequest):
-    """Sign in with phone or email + password"""
+    """Sign in with phone or email + PIN"""
     identifier = request.identifier.strip()
 
     # Normalize phone for lookup (handles +234, 234, 0 formats)
     normalized_phone = normalize_phone(identifier) if any(c.isdigit() for c in identifier) and "@" not in identifier else identifier
+
+    # Determine lockout key
+    lockout_key = normalized_phone if "@" not in identifier else identifier.lower()
+
+    # Check account lockout
+    lockout = await db.login_attempts.find_one({"identifier": lockout_key})
+    if lockout and lockout.get("locked_until"):
+        now = datetime.now(timezone.utc)
+        if now < lockout["locked_until"]:
+            remaining = int((lockout["locked_until"] - now).total_seconds())
+            remaining_min = (remaining // 60) + 1
+            raise HTTPException(
+                status_code=423,
+                detail=f"Account locked. Try again in {remaining_min} minute(s)."
+            )
+        else:
+            # Lock expired, clear it
+            await db.login_attempts.delete_one({"identifier": lockout_key})
 
     user = await db.users.find_one({
         "$or": [
@@ -1116,7 +1139,23 @@ async def signin(request: SigninRequest):
         raise HTTPException(status_code=401, detail="This account uses Google sign-in")
 
     if not verify_password(request.password, user["password_hash"]):
+        # Increment failed attempt count
+        if lockout:
+            new_count = lockout.get("count", 0) + 1
+            update: dict = {"$set": {"count": new_count}}
+            if new_count >= 5:
+                update["$set"]["locked_until"] = datetime.now(timezone.utc) + timedelta(minutes=15)
+            await db.login_attempts.update_one({"identifier": lockout_key}, update)
+        else:
+            await db.login_attempts.insert_one({
+                "identifier": lockout_key,
+                "count": 1,
+                "locked_until": None,
+            })
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Successful login — clear any failed attempts
+    await db.login_attempts.delete_one({"identifier": lockout_key})
 
     token = create_token(user["id"])
 
@@ -1340,8 +1379,8 @@ async def reset_password(request: ResetPasswordRequest):
     identifier = request.identifier.strip()
     is_email = "@" in identifier
 
-    if len(request.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if not is_valid_pin(request.new_password):
+        raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits")
 
     if is_email:
         email = identifier.lower()
