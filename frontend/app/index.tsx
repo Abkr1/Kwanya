@@ -286,13 +286,15 @@ export default function KwanyaApp() {
   };
 
   const loadConversationHistory = async () => {
-    // 1. Show cached data instantly
-    try {
-      const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
-      if (cached) {
-        setConversationHistory(JSON.parse(cached));
-      }
-    } catch {}
+    // 1. Show cached data only on initial load (state empty) to avoid ghost flashes
+    if (conversationHistory.length === 0) {
+      try {
+        const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+        if (cached) {
+          setConversationHistory(JSON.parse(cached));
+        }
+      } catch {}
+    }
 
     // 2. Fetch fresh data from server
     try {
@@ -598,57 +600,100 @@ export default function KwanyaApp() {
     const activeConversation = conv || currentConversation;
     if (!activeConversation) return;
 
-    abortControllerRef.current = new AbortController();
     cancelledRef.current = false;
     setIsLoading(true);
 
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversation_id: activeConversation.id,
-          user_id: userId,
-          message: userMessage,
-          language: 'ha',
-        }),
-        signal: abortControllerRef.current.signal,
-      });
+    const requestBody = JSON.stringify({
+      conversation_id: activeConversation.id,
+      user_id: userId,
+      message: userMessage,
+      language: 'ha',
+    });
 
-      if (!response.ok) {
-        // Handle HTTP errors (402 credit errors, etc.) before stream starts
-        let detail = '';
+    // Helper: process SSE lines from accumulated response text.
+    // Only processes complete lines (ending with \n) to avoid losing
+    // letters when onprogress fires mid-line.
+    let processedLength = 0;
+    let placeholderCreated = false;
+
+    const processSSEText = (fullText: string, flush = false) => {
+      const newText = fullText.substring(processedLength);
+      if (!newText) return;
+
+      // Find the last complete line boundary
+      const lastNewline = newText.lastIndexOf('\n');
+      if (lastNewline === -1 && !flush) {
+        // No complete line yet — wait for more data
+        return;
+      }
+
+      // Only advance past complete lines (or everything on flush)
+      const toProcess = flush ? newText : newText.substring(0, lastNewline + 1);
+      processedLength += toProcess.length;
+
+      const lines = toProcess.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+
         try {
-          const errBody = await response.json();
-          detail = errBody.detail || '';
-        } catch { /* ignore parse errors */ }
+          const event = JSON.parse(jsonStr);
 
-        if (response.status === 402) {
-          if (!isAuthenticated || detail.includes('Sign up')) {
-            Alert.alert(
-              t('chat.freeMessagesUsed'),
-              t('chat.freeMessagesBody'),
-              [
-                { text: t('common.signUp'), onPress: () => router.push('/auth/signup') },
-                { text: t('common.signIn'), onPress: () => router.push('/auth/signin') },
-                { text: t('common.ok'), style: 'cancel' },
-              ],
-            );
-          } else {
-            Alert.alert(
-              t('chat.insufficientCredits'),
-              detail || t('chat.needMoreCreditsChat'),
-              [
-                { text: t('chat.buyCredits'), onPress: () => router.push('/credits') },
-                { text: t('common.ok'), style: 'cancel' },
-              ],
-            );
+          if (event.text) {
+            if (!placeholderCreated) {
+              placeholderCreated = true;
+              setIsStreaming(true);
+              const timestamp = new Date().toISOString();
+              setMessages(prev => [...prev, { id: `temp_${Date.now()}`, role: 'assistant', content: event.text, timestamp }]);
+            } else {
+              setMessages(prev => {
+                const updated = [...prev];
+                const last = { ...updated[updated.length - 1] };
+                last.content += event.text;
+                updated[updated.length - 1] = last;
+                return updated;
+              });
+            }
           }
-          return;
-        }
 
-        const isCreditsError = detail.toLowerCase().includes('credit') || detail.toLowerCase().includes('kati');
-        if (isCreditsError) {
+          if (event.done) {
+            setMessages(prev => {
+              const updated = [...prev];
+              const last = { ...updated[updated.length - 1] };
+              last.id = event.message_id || last.id;
+              updated[updated.length - 1] = last;
+              AsyncStorage.setItem(`kwanya_messages_${activeConversation.id}`, JSON.stringify(updated)).catch(() => {});
+              return updated;
+            });
+            if (event.credit_balance !== null && event.credit_balance !== undefined) {
+              AsyncStorage.setItem(CREDITS_BALANCE_CACHE_KEY, String(event.credit_balance)).catch(() => {});
+            }
+          }
+
+          if (event.error) {
+            Alert.alert(t('common.error'), event.error || t('chat.failedGetResponse'));
+          }
+        } catch {
+          // Ignore malformed JSON lines
+        }
+      }
+    };
+
+    // Handle credit / HTTP error responses
+    const handleErrorDetail = (status: number, detail: string) => {
+      if (status === 402) {
+        if (!isAuthenticated || detail.includes('Sign up')) {
+          Alert.alert(
+            t('chat.freeMessagesUsed'),
+            t('chat.freeMessagesBody'),
+            [
+              { text: t('common.signUp'), onPress: () => router.push('/auth/signup') },
+              { text: t('common.signIn'), onPress: () => router.push('/auth/signin') },
+              { text: t('common.ok'), style: 'cancel' },
+            ],
+          );
+        } else {
           Alert.alert(
             t('chat.insufficientCredits'),
             detail || t('chat.needMoreCreditsChat'),
@@ -657,97 +702,121 @@ export default function KwanyaApp() {
               { text: t('common.ok'), style: 'cancel' },
             ],
           );
-        } else {
-          Alert.alert(t('common.error'), detail || t('chat.failedGetResponse'));
         }
         return;
       }
-
-      if (cancelledRef.current) return;
-
-      // Read SSE stream — placeholder message created on first chunk to avoid empty bubble
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let placeholderCreated = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (cancelledRef.current) {
-          reader.cancel();
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-
-          try {
-            const event = JSON.parse(jsonStr);
-
-            if (event.text) {
-              if (!placeholderCreated) {
-                // Create assistant message with first chunk — no empty bubble
-                placeholderCreated = true;
-                setIsStreaming(true);
-                const timestamp = new Date().toISOString();
-                setMessages(prev => [...prev, { id: `temp_${Date.now()}`, role: 'assistant', content: event.text, timestamp }]);
-              } else {
-                // Append subsequent chunks to the last message
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const last = { ...updated[updated.length - 1] };
-                  last.content += event.text;
-                  updated[updated.length - 1] = last;
-                  return updated;
-                });
-              }
-            }
-
-            if (event.done) {
-              // Finalize: update message ID and cache
-              setMessages(prev => {
-                const updated = [...prev];
-                const last = { ...updated[updated.length - 1] };
-                last.id = event.message_id || last.id;
-                updated[updated.length - 1] = last;
-                // Cache messages in background
-                AsyncStorage.setItem(`kwanya_messages_${activeConversation.id}`, JSON.stringify(updated)).catch(() => {});
-                return updated;
-              });
-              if (event.credit_balance !== null && event.credit_balance !== undefined) {
-                AsyncStorage.setItem(CREDITS_BALANCE_CACHE_KEY, String(event.credit_balance)).catch(() => {});
-              }
-            }
-
-            if (event.error) {
-              Alert.alert(t('common.error'), event.error || t('chat.failedGetResponse'));
-            }
-          } catch {
-            // Ignore malformed JSON lines
-          }
-        }
+      const isCreditsError = detail.toLowerCase().includes('credit') || detail.toLowerCase().includes('kati');
+      if (isCreditsError) {
+        Alert.alert(
+          t('chat.insufficientCredits'),
+          detail || t('chat.needMoreCreditsChat'),
+          [
+            { text: t('chat.buyCredits'), onPress: () => router.push('/credits') },
+            { text: t('common.ok'), style: 'cancel' },
+          ],
+        );
+      } else {
+        Alert.alert(t('common.error'), detail || t('chat.failedGetResponse'));
       }
+    };
 
-    } catch (error) {
-      if (error instanceof Error && (error.name === 'AbortError' || cancelledRef.current)) {
-        console.log('Request cancelled by user');
-        return;
+    // Use XHR on native (React Native fetch doesn't support ReadableStream)
+    // Use fetch + getReader on web
+    if (Platform.OS === 'web') {
+      abortControllerRef.current = new AbortController();
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+          signal: abortControllerRef.current.signal,
+        });
+
+        if (!response.ok) {
+          let detail = '';
+          try { const errBody = await response.json(); detail = errBody.detail || ''; } catch {}
+          handleErrorDetail(response.status, detail);
+          return;
+        }
+        if (cancelledRef.current) return;
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let accumulated = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (cancelledRef.current) { reader.cancel(); break; }
+          accumulated += decoder.decode(value, { stream: true });
+          processSSEText(accumulated);
+        }
+        // Flush any remaining partial line
+        processSSEText(accumulated, true);
+      } catch (error) {
+        if (error instanceof Error && (error.name === 'AbortError' || cancelledRef.current)) {
+          console.log('Request cancelled by user');
+          return;
+        }
+        console.error('Chat error:', error);
+        Alert.alert(t('common.error'), t('chat.failedGetResponse'));
+      } finally {
+        setIsLoading(false);
+        setIsStreaming(false);
+        abortControllerRef.current = null;
       }
-      console.error('Chat error:', error);
-      Alert.alert(t('common.error'), t('chat.failedGetResponse'));
-    } finally {
-      setIsLoading(false);
-      setIsStreaming(false);
-      abortControllerRef.current = null;
+    } else {
+      // Native: use XMLHttpRequest which fires onprogress with partial responseText
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          // Store so stopGenerating can abort
+          const abortHandler = () => { xhr.abort(); };
+          abortControllerRef.current = { signal: { addEventListener: () => {}, removeEventListener: () => {} }, abort: abortHandler } as unknown as AbortController;
+
+          xhr.open('POST', `${BACKEND_URL}/api/chat/stream`);
+          xhr.setRequestHeader('Content-Type', 'application/json');
+
+          xhr.onprogress = () => {
+            if (cancelledRef.current) { xhr.abort(); return; }
+            processSSEText(xhr.responseText);
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              // Flush any remaining partial line
+              processSSEText(xhr.responseText, true);
+              resolve();
+            } else {
+              let detail = '';
+              try { const errBody = JSON.parse(xhr.responseText); detail = errBody.detail || ''; } catch {}
+              handleErrorDetail(xhr.status, detail);
+              resolve(); // don't reject — error already shown
+            }
+          };
+
+          xhr.onerror = () => {
+            reject(new Error('Network error'));
+          };
+
+          xhr.onabort = () => {
+            console.log('Request cancelled by user');
+            resolve();
+          };
+
+          xhr.send(requestBody);
+        });
+      } catch (error) {
+        if (!cancelledRef.current) {
+          console.error('Chat error:', error);
+          Alert.alert(t('common.error'), t('chat.failedGetResponse'));
+        }
+      } finally {
+        setIsLoading(false);
+        setIsStreaming(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -1367,7 +1436,12 @@ export default function KwanyaApp() {
                               onPress: async () => {
                                 try {
                                   await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
-                                  setConversationHistory((prev) => prev.filter((c) => c.id !== conv.id));
+                                  setConversationHistory((prev) => {
+                                    const updated = prev.filter((c) => c.id !== conv.id);
+                                    AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+                                    return updated;
+                                  });
+                                  AsyncStorage.removeItem(`kwanya_messages_${conv.id}`).catch(() => {});
                                   if (currentConversation?.id === conv.id) {
                                     setCurrentConversation(null);
                                     setMessages([]);
@@ -1409,7 +1483,12 @@ export default function KwanyaApp() {
                                 onPress: async () => {
                                   try {
                                     await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
-                                    setConversationHistory((prev) => prev.filter((c) => c.id !== conv.id));
+                                    setConversationHistory((prev) => {
+                                      const updated = prev.filter((c) => c.id !== conv.id);
+                                      AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+                                      return updated;
+                                    });
+                                    AsyncStorage.removeItem(`kwanya_messages_${conv.id}`).catch(() => {});
                                     if (currentConversation?.id === conv.id) {
                                       setCurrentConversation(null);
                                       setMessages([]);

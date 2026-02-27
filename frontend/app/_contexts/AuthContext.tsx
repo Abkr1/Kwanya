@@ -189,12 +189,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    try {
-      await axios.post(`${BACKEND_URL}/api/auth/signout`);
-    } catch {
-      // Ignore signout API errors
-    }
+    // Clear local state immediately — don't block on the network call
+    // (the backend signout is a no-op; token is stateless JWT)
     await clearAuth();
+    // Fire-and-forget the server call
+    axios.post(`${BACKEND_URL}/api/auth/signout`).catch(() => {});
   }, []);
 
   const verifyOTP = useCallback(async (phone: string, otp: string) => {
