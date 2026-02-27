@@ -171,6 +171,14 @@ class RateLimiter:
         if len(self._requests[key]) >= self.max_requests:
             return False
         self._requests[key].append(now)
+
+        # Periodically purge stale IPs to prevent memory growth
+        max_age = self.window_seconds * 2
+        cutoff = now - max_age
+        stale_keys = [k for k, v in self._requests.items() if k != key and (not v or v[-1] < cutoff)]
+        for k in stale_keys:
+            del self._requests[k]
+
         return True
 
 rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
@@ -469,76 +477,6 @@ async def verify_sms_otp_via_termii(pin_id: str, otp: str) -> bool:
         return False
 
 
-@api_router.get("/debug/test-sms/{phone}")
-async def debug_test_sms(phone: str):
-    """Debug endpoint: list sender IDs and test Token OTP API with Termii default."""
-    clean_phone = phone_to_international(phone)
-
-    results = {}
-    async with httpx.AsyncClient(timeout=15) as http:
-        # 1. List all sender IDs on account
-        try:
-            sid_resp = await http.get(f"https://api.ng.termii.com/api/sender-id?api_key={TERMII_API_KEY}")
-            results["sender_ids"] = {"status": sid_resp.status_code, "body": sid_resp.json()}
-        except Exception as e:
-            results["sender_ids"] = {"error": str(e)}
-
-        # 2. Test Token OTP with "Termii" as sender (Termii's own default)
-        try:
-            token_resp = await http.post("https://api.ng.termii.com/api/sms/otp/send", json={
-                "api_key": TERMII_API_KEY,
-                "message_type": "NUMERIC",
-                "to": clean_phone,
-                "from": "Termii",
-                "channel": "generic",
-                "pin_attempts": 3,
-                "pin_time_to_live": 5,
-                "pin_length": 6,
-                "pin_placeholder": "< 123456 >",
-                "message_text": "Your Kwanya code is < 123456 >",
-                "pin_type": "NUMERIC",
-            })
-            results["token_otp_termii_sender"] = {"status": token_resp.status_code, "body": token_resp.json()}
-        except Exception as e:
-            results["token_otp_termii_sender"] = {"error": str(e)}
-
-    return {"phone_sent_to": clean_phone, "results": results}
-
-
-@api_router.post("/debug/migrate-phones")
-async def migrate_phone_numbers():
-    """One-time migration: convert all +234/234 phone numbers to 0-prefix local format."""
-    try:
-        updated = 0
-        users = await db.users.find({"phone": {"$exists": True}}, {"_id": 0, "id": 1, "phone": 1}).to_list(None)
-        for user in users:
-            old_phone = user.get("phone", "")
-            if not old_phone:
-                continue
-            new_phone = normalize_phone(old_phone)
-            if old_phone != new_phone:
-                await db.users.update_one({"id": user["id"]}, {"$set": {"phone": new_phone}})
-                updated += 1
-                logger.info(f"Migrated phone: {old_phone} → {new_phone}")
-
-        # Also migrate OTP records
-        otp_updated = 0
-        otps = await db.otps.find({"phone": {"$exists": True}}).to_list(None)
-        for otp in otps:
-            old_phone = otp.get("phone", "")
-            if not old_phone:
-                continue
-            new_phone = normalize_phone(old_phone)
-            if old_phone != new_phone:
-                await db.otps.update_one({"_id": otp["_id"]}, {"$set": {"phone": new_phone}})
-                otp_updated += 1
-
-        return {"success": True, "users_updated": updated, "otps_updated": otp_updated}
-    except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        return {"success": False, "error": str(e)}
-
-
 async def send_verification_email(email: str, code: str) -> bool:
     """Send verification code via Termii Email Token API. Returns True on success."""
     if not TERMII_API_KEY or TERMII_API_KEY.startswith("<"):
@@ -621,12 +559,18 @@ async def transcribe_audio(
     try:
         logger.info(f"Received audio file: {audio.filename}, size: {audio.size}")
 
+        # Reject oversized audio files (25MB max)
+        MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB
+        content = await audio.read()
+        if len(content) > MAX_AUDIO_SIZE:
+            raise HTTPException(status_code=413, detail="Audio file too large. Maximum size is 25MB.")
+
         # Save uploaded file temporarily
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
         temp_path = temp_file.name
+        temp_file.close()
 
         async with aiofiles.open(temp_path, 'wb') as f:
-            content = await audio.read()
             await f.write(content)
 
         # Convert M4A to WAV (16kHz mono) — uses ffmpeg if available, otherwise torchaudio
@@ -646,28 +590,12 @@ async def transcribe_audio(
         except asyncio.TimeoutError:
             raise Exception("Transcription timed out. Please try again.")
 
-        # Save message to database
-        message = Message(
-            conversation_id=conversation_id,
-            role="user",
-            content=transcribed_text
-        )
-
-        await db.messages.insert_one(message.model_dump())
-
-        # Update conversation timestamp
-        await db.conversations.update_one(
-            {"id": conversation_id},
-            {"$set": {"updated_at": datetime.now(timezone.utc)}}
-        )
-
         logger.info(f"Transcription successful: {transcribed_text[:50]}...")
 
         remaining = user["credit_balance"] - VOICE_CREDIT_COST if is_authenticated else None
         return {
             "success": True,
             "transcription": transcribed_text,
-            "message_id": message.id,
             "credits_used": VOICE_CREDIT_COST if is_authenticated else 0,
             "credit_balance": remaining,
         }
@@ -1241,13 +1169,16 @@ async def signup_with_google(request: GoogleSignupRequest):
             is_email_verified=True,  # Google already verifies email
         )
 
-        await db.users.insert_one(user.model_dump())
+        user_data = user.model_dump()
+        user_data["credit_balance"] = WELCOME_BONUS_CREDITS
+        await db.users.insert_one(user_data)
+        logger.info(f"New Google user {email} — awarded {WELCOME_BONUS_CREDITS} welcome credits")
         token = create_token(user.id)
 
         return {
             "success": True,
             "token": token,
-            "user": sanitize_user(user.model_dump()),
+            "user": sanitize_user(user_data),
         }
     except HTTPException:
         raise
@@ -1991,13 +1922,6 @@ async def health_check():
             "gemini": "configured (Vertex AI)" if use_vertex else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
         },
         "asr_engine": "Google Cloud Speech-to-Text v2 (Hausa ha-NG)",
-        "gemini_env_debug": {
-            "has_sa_json": bool(sa_json),
-            "has_sa_b64": bool(sa_b64),
-            "has_gcp_use_vertex": bool(os.environ.get('GCP_USE_VERTEX')),
-            "has_gcp_project": bool(os.environ.get('GCP_PROJECT_ID')),
-            "has_api_key": bool(os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')),
-        },
     }
 
 
