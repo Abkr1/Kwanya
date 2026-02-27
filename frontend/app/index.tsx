@@ -479,6 +479,15 @@ export default function KwanyaApp() {
         const transcribedText = response.data.transcription;
         const isFirstMessage = messages.length === 0;
 
+        // Add transcribed text as a user message in the UI
+        const userMessage: Message = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: transcribedText,
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, userMessage]);
+
         if (isFirstMessage) {
           await autoNameConversation(conversation.id, transcribedText);
         }
