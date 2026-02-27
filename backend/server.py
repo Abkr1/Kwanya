@@ -680,6 +680,105 @@ async def transcribe_audio(
                     pass
 
 
+@api_router.post("/speech-to-text/stream")
+async def transcribe_audio_stream(
+    audio: UploadFile = File(...),
+    user_id: str = File(...),
+    conversation_id: str = File(...),
+):
+    """Transcribe Hausa audio and stream result word-by-word via SSE."""
+    # --- Credit / auth checks (before SSE, so 402 = normal HTTP) ---
+    user = await db.users.find_one({"id": user_id}) if user_id else None
+    is_authenticated = user is not None
+    credits_deducted = False
+
+    if is_authenticated:
+        if not await deduct_credits(user_id, VOICE_CREDIT_COST):
+            raise HTTPException(
+                status_code=402,
+                detail="Insufficient credits. Please top up to continue.",
+            )
+        credits_deducted = True
+    else:
+        user_conversations = await db.conversations.find(
+            {"user_id": user_id}
+        ).to_list(None)
+        conv_ids = [c["id"] for c in user_conversations]
+        total_messages = 0
+        if conv_ids:
+            total_messages = await db.messages.count_documents(
+                {"conversation_id": {"$in": conv_ids}, "role": "user"}
+            )
+        if total_messages >= FREE_MESSAGE_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+            )
+
+    # Read audio content before entering generator (UploadFile must be consumed in request scope)
+    content = await audio.read()
+    MAX_AUDIO_SIZE = 25 * 1024 * 1024
+    if len(content) > MAX_AUDIO_SIZE:
+        raise HTTPException(status_code=413, detail="Audio file too large. Maximum size is 25MB.")
+
+    async def event_generator():
+        nonlocal credits_deducted
+        temp_path = None
+        wav_path = None
+        try:
+            # Save uploaded file temporarily
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
+            temp_path = temp_file.name
+            temp_file.close()
+
+            async with aiofiles.open(temp_path, 'wb') as f:
+                await f.write(content)
+
+            # Convert M4A → WAV
+            wav_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            wav_path = wav_temp.name
+            wav_temp.close()
+
+            convert_audio_to_wav(temp_path, wav_path)
+
+            # Batch transcribe
+            transcribed_text = await asyncio.wait_for(
+                transcribe_hausa_audio(wav_path),
+                timeout=30,
+            )
+
+            if not transcribed_text or not transcribed_text.strip():
+                yield f"data: {json.dumps({'error': 'No speech detected. Please try again.'})}\n\n"
+                return
+
+            # Stream words one by one
+            words = transcribed_text.split()
+            for i, word in enumerate(words):
+                token = word + (" " if i < len(words) - 1 else "")
+                yield f"data: {json.dumps({'text': token})}\n\n"
+                await asyncio.sleep(0.03)
+
+            # Final done event
+            remaining = user["credit_balance"] - VOICE_CREDIT_COST if is_authenticated else None
+            yield f"data: {json.dumps({'done': True, 'transcription': transcribed_text, 'credits_used': VOICE_CREDIT_COST if is_authenticated else 0, 'credit_balance': remaining})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Streaming transcription error: {str(e)}")
+            if credits_deducted:
+                await refund_credits(user_id, VOICE_CREDIT_COST)
+                credits_deducted = False
+            yield f"data: {json.dumps({'error': f'Transcription failed: {str(e)}'})}\n\n"
+        finally:
+            for path in (temp_path, wav_path):
+                if path:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 # ==================== CHAT ENDPOINT ====================
 
 CHAT_CREDIT_COST = 5   # credits (₦5) per text message

@@ -458,57 +458,39 @@ export default function KwanyaApp() {
     const conversation = await ensureConversation();
     if (!conversation) return;
 
-    try {
-      const formData = new FormData();
+    const isFirstMessage = messages.length === 0;
 
-      const audioFile: AudioFileUpload = {
-        uri: audioUri,
-        type: 'audio/m4a',
-        name: 'recording.m4a',
-      };
+    // Add empty user message bubble immediately
+    const userMsgId = Date.now().toString();
+    const userMessage: Message = {
+      id: userMsgId,
+      role: 'user',
+      content: '',
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
 
-      formData.append('audio', audioFile as unknown as Blob);
-      formData.append('user_id', userId!);
-      formData.append('conversation_id', conversation.id);
+    const formData = new FormData();
+    const audioFile: AudioFileUpload = {
+      uri: audioUri,
+      type: 'audio/m4a',
+      name: 'recording.m4a',
+    };
+    formData.append('audio', audioFile as unknown as Blob);
+    formData.append('user_id', userId!);
+    formData.append('conversation_id', conversation.id);
 
-      const response = await axios.post(
-        `${BACKEND_URL}/api/speech-to-text`,
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 120000,
-        }
-      );
+    // Helper to remove the empty user bubble on failure
+    const removeBubble = () => {
+      setMessages((prev) => prev.filter((m) => m.id !== userMsgId));
+    };
 
-      if (response.data.success) {
-        const transcribedText = response.data.transcription;
-        const isFirstMessage = messages.length === 0;
-
-        // Add transcribed text as a user message in the UI
-        const userMessage: Message = {
-          id: Date.now().toString(),
-          role: 'user',
-          content: transcribedText,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, userMessage]);
-
-        if (isFirstMessage) {
-          await autoNameConversation(conversation.id, transcribedText);
-        }
-
-        await getAIResponse(transcribedText, conversation);
-      }
-
-    } catch (error) {
+    // Handle credit / HTTP error responses
+    const handleTranscribeError = (status: number, detail: string) => {
+      removeBubble();
       setIsLoading(false);
-      const axiosErr = error as AxiosError<{ detail?: string }>;
-      console.error('Transcription error:', error);
-      const status = axiosErr.response?.status;
       if (status === 402) {
-        const detail = axiosErr.response?.data?.detail || '';
         if (!isAuthenticated || detail.includes('Sign up')) {
           Alert.alert(
             t('chat.freeMessagesUsed'),
@@ -529,13 +511,152 @@ export default function KwanyaApp() {
             ],
           );
         }
+      } else if (status === 413) {
+        Alert.alert(t('common.error'), detail || 'Audio file too large.');
       } else {
-        let msg = axiosErr.response?.data?.detail || t('chat.failedTranscribe');
+        let msg = detail || t('chat.failedTranscribe');
         if (status === 520 || status === 522 || status === 524) {
           msg = t('chat.serverSlowMessage');
         }
         Alert.alert(t('common.error'), msg);
       }
+    };
+
+    // SSE line processor for transcription stream
+    let processedLength = 0;
+    let finalTranscription = '';
+
+    const processSSELines = (fullText: string, flush = false) => {
+      const newText = fullText.substring(processedLength);
+      if (!newText) return;
+
+      const lastNewline = newText.lastIndexOf('\n');
+      if (lastNewline === -1 && !flush) return;
+
+      const toProcess = flush ? newText : newText.substring(0, lastNewline + 1);
+      processedLength += toProcess.length;
+
+      const lines = toProcess.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const event = JSON.parse(jsonStr);
+
+          if (event.text) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const idx = updated.findIndex((m) => m.id === userMsgId);
+              if (idx !== -1) {
+                updated[idx] = { ...updated[idx], content: updated[idx].content + event.text };
+              }
+              return updated;
+            });
+          }
+
+          if (event.done) {
+            finalTranscription = event.transcription || '';
+            if (event.credit_balance !== null && event.credit_balance !== undefined) {
+              AsyncStorage.setItem(CREDITS_BALANCE_CACHE_KEY, String(event.credit_balance)).catch(() => {});
+            }
+          }
+
+          if (event.error) {
+            removeBubble();
+            setIsLoading(false);
+            Alert.alert(t('common.error'), event.error || t('chat.failedTranscribe'));
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      }
+    };
+
+    try {
+      if (Platform.OS === 'web') {
+        // Web: fetch + ReadableStream
+        const response = await fetch(`${BACKEND_URL}/api/speech-to-text/stream`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          let detail = '';
+          try { const errBody = await response.json(); detail = errBody.detail || ''; } catch {}
+          handleTranscribeError(response.status, detail);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let accumulated = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          accumulated += decoder.decode(value, { stream: true });
+          processSSELines(accumulated);
+        }
+        processSSELines(accumulated, true);
+      } else {
+        // Native: XMLHttpRequest with onprogress
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `${BACKEND_URL}/api/speech-to-text/stream`);
+
+          xhr.onprogress = () => {
+            processSSELines(xhr.responseText);
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              processSSELines(xhr.responseText, true);
+              resolve();
+            } else {
+              let detail = '';
+              try { const errBody = JSON.parse(xhr.responseText); detail = errBody.detail || ''; } catch {}
+              handleTranscribeError(xhr.status, detail);
+              resolve();
+            }
+          };
+
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.onabort = () => resolve();
+
+          xhr.send(formData);
+        });
+      }
+
+      // After stream completes
+      if (!finalTranscription) {
+        removeBubble();
+        setIsLoading(false);
+        return;
+      }
+
+      // Set final transcription for consistency
+      setMessages((prev) => {
+        const updated = [...prev];
+        const idx = updated.findIndex((m) => m.id === userMsgId);
+        if (idx !== -1) {
+          updated[idx] = { ...updated[idx], content: finalTranscription };
+        }
+        return updated;
+      });
+
+      if (isFirstMessage) {
+        await autoNameConversation(conversation.id, finalTranscription);
+      }
+
+      await getAIResponse(finalTranscription, conversation);
+    } catch (error) {
+      console.error('Transcription error:', error);
+      removeBubble();
+      setIsLoading(false);
+      Alert.alert(t('common.error'), t('chat.failedTranscribe'));
     }
   };
 
