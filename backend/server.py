@@ -19,7 +19,6 @@ import tempfile
 import asyncio
 from collections import defaultdict
 import time
-from concurrent.futures import ThreadPoolExecutor
 import bcrypt
 from jose import jwt as jose_jwt, JWTError
 import json
@@ -30,11 +29,9 @@ import hashlib
 import hmac
 import base64
 
-# Hausa ASR (NCAIR1/Hausa-ASR) - Fine-tuned Whisper for Hausa
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-import soundfile as sf
-import torchaudio
-import torch
+# Google Cloud Speech-to-Text for Hausa ASR
+from google.cloud import speech_v2 as cloud_speech
+from google.oauth2 import service_account as gcp_sa
 
 # Google Gemini
 from google import genai
@@ -47,8 +44,8 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Thread pool for ASR processing
-asr_executor = ThreadPoolExecutor(max_workers=2)
+# Google Cloud Speech-to-Text client (initialized at startup)
+speech_client = None
 
 # JWT Configuration
 JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-production")
@@ -71,100 +68,82 @@ MONNIFY_BASE_URL = os.environ.get("MONNIFY_BASE_URL", "https://sandbox.monnify.c
 # Monnify token cache
 _monnify_token_cache: dict = {"token": None, "expires_at": 0.0}
 
-# ==================== HAUSA ASR MODEL (Abkrs1/Hausa-ASR-copy) ====================
-# Fine-tuned Whisper model specifically for Hausa language
-hausa_asr_pipe = None
+# ==================== GOOGLE CLOUD SPEECH-TO-TEXT (Hausa) ====================
 
-def load_hausa_asr():
-    """Load Abkrs1/Hausa-ASR-copy model for Hausa speech recognition"""
-    global hausa_asr_pipe
-    
-    logger.info("Loading Hausa ASR model (Abkrs1/Hausa-ASR-copy)...")
-    
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    
-    model_id = "Abkrs1/Hausa-ASR-copy"
-    
-    hausa_asr_pipe = pipeline(
-        "automatic-speech-recognition",
-        model=model_id,
-        torch_dtype=torch_dtype,
-        device=device,
-    )
-    
-    logger.info("Hausa ASR model loaded successfully!")
-    return hausa_asr_pipe
+def init_speech_client():
+    """Initialize Google Cloud Speech-to-Text client using GCP credentials"""
+    global speech_client
 
-def get_hausa_asr():
-    """Get or load Hausa ASR pipeline"""
-    global hausa_asr_pipe
-    if hausa_asr_pipe is None:
-        hausa_asr_pipe = load_hausa_asr()
-    return hausa_asr_pipe
+    client_kwargs = {}
+    sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
+    sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
+
+    if sa_b64:
+        sa_json = base64.b64decode(sa_b64).decode('utf-8')
+    if sa_json:
+        creds = gcp_sa.Credentials.from_service_account_info(
+            json.loads(sa_json),
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        client_kwargs['credentials'] = creds
+
+    speech_client = cloud_speech.SpeechClient(**client_kwargs)
+    logger.info("Google Cloud Speech-to-Text client initialized")
+
 
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 
 def convert_audio_to_wav(input_path: str, output_path: str) -> None:
-    """Convert audio file to 16kHz mono WAV. Uses ffmpeg if available, otherwise torchaudio."""
-    if HAS_FFMPEG:
-        result = subprocess.run([
-            'ffmpeg', '-y', '-i', input_path,
-            '-ar', '16000', '-ac', '1', '-f', 'wav', output_path
-        ], capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            raise Exception(f"FFmpeg conversion failed: {result.stderr}")
-    else:
-        # Fallback: use torchaudio to load and convert
-        waveform, sample_rate = torchaudio.load(input_path)
-        # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-        # Resample to 16kHz
-        if sample_rate != 16000:
-            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-            waveform = resampler(waveform)
-        torchaudio.save(output_path, waveform, 16000)
+    """Convert audio file to 16kHz mono WAV using ffmpeg."""
+    result = subprocess.run([
+        'ffmpeg', '-y', '-i', input_path,
+        '-ar', '16000', '-ac', '1', '-f', 'wav', output_path
+    ], capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise Exception(f"FFmpeg conversion failed: {result.stderr}")
 
 
-def transcribe_hausa_audio_sync(audio_path: str) -> str:
-    """Synchronous Hausa audio transcription"""
-    pipe = get_hausa_asr()
+async def transcribe_hausa_audio(wav_path: str) -> str:
+    """Transcribe Hausa audio using Google Cloud Speech-to-Text v2"""
+    project_id = os.environ.get('GCP_PROJECT_ID', '')
 
-    # Load and resample audio to 16kHz if needed
-    audio, sample_rate = sf.read(audio_path)
+    with open(wav_path, 'rb') as f:
+        audio_content = f.read()
 
-    if sample_rate != 16000:
-        audio_tensor = torch.tensor(audio).float()
-        if len(audio_tensor.shape) == 1:
-            audio_tensor = audio_tensor.unsqueeze(0)
-        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-        audio_resampled = resampler(audio_tensor)
-        audio = audio_resampled.squeeze().numpy()
+    config = cloud_speech.RecognitionConfig(
+        auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
+        language_codes=["ha-NG"],
+        model="long",
+    )
 
-    # Transcribe
-    result = pipe(audio, generate_kwargs={"language": "ha", "task": "transcribe"})
-    return result["text"]
+    request = cloud_speech.RecognizeRequest(
+        recognizer=f"projects/{project_id}/locations/global/recognizers/_",
+        config=config,
+        content=audio_content,
+    )
+
+    response = await asyncio.to_thread(speech_client.recognize, request=request)
+
+    transcript = ""
+    for result in response.results:
+        transcript += result.alternatives[0].transcript
+
+    return transcript.strip()
 
 # ==================== LIFESPAN ====================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle"""
-    # Log audio conversion backend
-    logger.info(f"Audio conversion: {'ffmpeg' if HAS_FFMPEG else 'torchaudio (ffmpeg not found)'}")
-
-    # Preload Hausa ASR model — wait for it to finish before accepting requests
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(asr_executor, load_hausa_asr)
-    logger.info("ASR model ready, server accepting requests")
+    # Initialize Google Cloud Speech-to-Text client
+    init_speech_client()
+    logger.info("Server ready, accepting requests")
 
     yield
 
     # Shutdown
     client.close()
-    asr_executor.shutdown(wait=False)
 
 
 # Configure logging
@@ -599,7 +578,7 @@ def sanitize_user(user: dict) -> dict:
     }
 
 
-# ==================== SPEECH TO TEXT ENDPOINT (Abkrs1/Hausa-ASR-copy) ====================
+# ==================== SPEECH TO TEXT ENDPOINT (Google Cloud STT) ====================
 
 @api_router.post("/speech-to-text")
 async def transcribe_audio(
@@ -607,7 +586,7 @@ async def transcribe_audio(
     user_id: str = File(...),
     conversation_id: str = File(...)
 ):
-    """Transcribe Hausa audio using Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)"""
+    """Transcribe Hausa audio using Google Cloud Speech-to-Text"""
     # Check credits / free message limit
     user = await db.users.find_one({"id": user_id}) if user_id else None
     is_authenticated = user is not None
@@ -658,19 +637,14 @@ async def transcribe_audio(
         convert_audio_to_wav(temp_path, wav_path)
         logger.info(f"Audio converted to WAV successfully (using {'ffmpeg' if HAS_FFMPEG else 'torchaudio'})")
 
-        # Transcribe using Hausa ASR in thread pool
-        loop = asyncio.get_running_loop()
+        # Transcribe using Google Cloud Speech-to-Text
         try:
             transcribed_text = await asyncio.wait_for(
-                loop.run_in_executor(
-                    asr_executor,
-                    transcribe_hausa_audio_sync,
-                    wav_path
-                ),
-                timeout=120
+                transcribe_hausa_audio(wav_path),
+                timeout=30
             )
         except asyncio.TimeoutError:
-            raise Exception("Transcription timed out. Please try a shorter recording.")
+            raise Exception("Transcription timed out. Please try again.")
 
         # Save message to database
         message = Message(
@@ -1855,11 +1829,10 @@ async def health_check():
         "status": "healthy" if mongo_status == "connected" else "degraded",
         "services": {
             "mongodb": mongo_status,
-            "asr": "Abkrs1/Hausa-ASR-copy (fine-tuned Whisper for Hausa)",
+            "asr": "Google Cloud Speech-to-Text (ha-NG)",
             "gemini": "configured (Vertex AI)" if use_vertex else ("configured (API key)" if (os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY')) else "not configured"),
-            "audio_converter": "ffmpeg" if HAS_FFMPEG else "torchaudio",
         },
-        "asr_engine": "Abkrs1/Hausa-ASR-copy (Fine-tuned Whisper Small)",
+        "asr_engine": "Google Cloud Speech-to-Text v2 (Hausa ha-NG)",
         "gemini_env_debug": {
             "has_sa_json": bool(sa_json),
             "has_sa_b64": bool(sa_b64),
