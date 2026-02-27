@@ -166,11 +166,40 @@ def init_gemini_client():
         logger.info("Gemini client initialized (API key)")
 
 
+async def ensure_indexes():
+    """Create MongoDB indexes for common query patterns."""
+    # Users — looked up by id, phone, email, google_id
+    await db.users.create_index("id", unique=True)
+    await db.users.create_index("phone", sparse=True)
+    await db.users.create_index("email", sparse=True)
+    await db.users.create_index("google_id", sparse=True)
+
+    # Conversations — listed by user, looked up by id
+    await db.conversations.create_index("id", unique=True)
+    await db.conversations.create_index("user_id")
+
+    # Messages — queried by conversation_id, sorted by timestamp
+    await db.messages.create_index([("conversation_id", 1), ("timestamp", -1)])
+
+    # Transactions — looked up by payment_reference, queried by user
+    await db.transactions.create_index("payment_reference", unique=True)
+    await db.transactions.create_index("user_id")
+
+    # Auth-related — OTPs, email codes, login attempts, password resets
+    await db.otps.create_index("phone")
+    await db.email_codes.create_index("email")
+    await db.login_attempts.create_index("identifier")
+    await db.password_reset_codes.create_index("identifier")
+
+    logger.info("MongoDB indexes ensured")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle"""
     init_speech_client()
     init_gemini_client()
+    await ensure_indexes()
     logger.info("Server ready, accepting requests")
 
     yield
