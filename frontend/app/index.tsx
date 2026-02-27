@@ -359,21 +359,26 @@ export default function KwanyaApp() {
       // Update the title in-place instead of reloading the entire list
       setConversationHistory((prev) => {
         const exists = prev.some((c) => c.id === conversationId);
+        let updated: Conversation[];
         if (exists) {
-          return prev.map((c) =>
+          updated = prev.map((c) =>
             c.id === conversationId ? { ...c, title } : c
           );
+        } else {
+          // If conversation isn't in the list yet, add it to the top
+          const newConv: Conversation = {
+            id: conversationId,
+            user_id: userId!,
+            title,
+            language: 'ha',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          updated = [newConv, ...prev];
         }
-        // If conversation isn't in the list yet, add it to the top
-        const newConv: Conversation = {
-          id: conversationId,
-          user_id: userId!,
-          title,
-          language: 'ha',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        return [newConv, ...prev];
+        // Sync cache so sidebar stays correct across app restarts
+        AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+        return updated;
       });
     } catch (error) {
       console.error('Failed to auto-name conversation:', error);
@@ -451,7 +456,6 @@ export default function KwanyaApp() {
     const conversation = await ensureConversation();
     if (!conversation) return;
 
-    setIsLoading(true);
     try {
       const formData = new FormData();
 
@@ -497,6 +501,7 @@ export default function KwanyaApp() {
       }
 
     } catch (error) {
+      setIsLoading(false);
       const axiosErr = error as AxiosError<{ detail?: string }>;
       console.error('Transcription error:', error);
       const status = axiosErr.response?.status;
@@ -529,8 +534,6 @@ export default function KwanyaApp() {
         }
         Alert.alert(t('common.error'), msg);
       }
-    } finally {
-      setIsLoading(false);
     }
   };
 
