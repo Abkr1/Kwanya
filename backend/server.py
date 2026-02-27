@@ -1648,7 +1648,7 @@ async def get_monnify_token() -> str:
         return _monnify_token_cache["token"]
 
     credentials = base64.b64encode(f"{MONNIFY_API_KEY}:{MONNIFY_SECRET_KEY}".encode()).decode()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(
             f"{MONNIFY_BASE_URL}/api/v1/auth/login",
             headers={"Authorization": f"Basic {credentials}"},
@@ -1710,7 +1710,7 @@ async def initialize_payment(
     # Initialize with Monnify
     try:
         token = await get_monnify_token()
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(timeout=15) as http_client:
             resp = await http_client.post(
                 f"{MONNIFY_BASE_URL}/api/v1/merchant/transactions/init-transaction",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1781,12 +1781,10 @@ async def verify_payment(
     # Verify with Monnify API
     try:
         token = await get_monnify_token()
-        from urllib.parse import quote
-        raw_ref = transaction.get("transaction_reference") or payment_reference
-        encoded_ref = quote(raw_ref, safe="")
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(timeout=15) as http_client:
             resp = await http_client.get(
-                f"{MONNIFY_BASE_URL}/api/v2/transactions/{encoded_ref}",
+                f"{MONNIFY_BASE_URL}/api/v2/merchant/transactions/query",
+                params={"paymentReference": payment_reference},
                 headers={"Authorization": f"Bearer {token}"},
             )
             resp.raise_for_status()
