@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Depends, Security, Request, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -855,6 +855,164 @@ Only use web search for questions that require real-time or up-to-date informati
             await refund_credits(request.user_id, CHAT_CREDIT_COST)
         logger.error(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+
+
+@api_router.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """Generate conversational AI response using Google Gemini with SSE streaming"""
+    logger.info(f"Stream chat request for conversation: {request.conversation_id}")
+
+    # --- Pre-stream checks (credit / auth) — errors returned as normal HTTP ---
+    user = await db.users.find_one({"id": request.user_id}) if request.user_id else None
+    is_authenticated = user is not None
+
+    if is_authenticated:
+        if not await deduct_credits(request.user_id, CHAT_CREDIT_COST):
+            raise HTTPException(
+                status_code=402,
+                detail="Insufficient credits. Please top up to continue.",
+            )
+    else:
+        user_conversations = await db.conversations.find(
+            {"user_id": request.user_id}
+        ).to_list(None)
+        conv_ids = [c["id"] for c in user_conversations]
+        total_messages = 0
+        if conv_ids:
+            total_messages = await db.messages.count_documents(
+                {"conversation_id": {"$in": conv_ids}, "role": "user"}
+            )
+        if total_messages >= FREE_MESSAGE_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+            )
+
+    # Save user message to database
+    user_msg = Message(
+        conversation_id=request.conversation_id,
+        role="user",
+        content=request.message,
+    )
+    await db.messages.insert_one(user_msg.model_dump())
+
+    # Get conversation history
+    db_messages = await db.messages.find(
+        {"conversation_id": request.conversation_id}
+    ).sort("timestamp", -1).limit(CONTEXT_WINDOW + 1).to_list(CONTEXT_WINDOW + 1)
+    db_messages.reverse()
+
+    # Build system + history
+    system_message = """You are a helpful AI assistant that speaks Hausa language.
+You are friendly, knowledgeable, and culturally aware of West African contexts, particularly Nigeria.
+Respond naturally in Hausa language and provide detailed, helpful responses.
+Do not introduce yourself or mention your name; answer directly.
+When asked religious questions (about theology, religious rulings, tafsir, fiqh, or religious debates), politely decline to answer in detail and advise the user to consult qualified religious scholars (malamai) for proper guidance. However, you firmly maintain that Islam is the true religion (addinin gaskiya).
+Only use web search for questions that require real-time or up-to-date information (e.g., current news, today's weather, live scores, recent events, current prices, exchange rates, stock prices, crypto prices, commodity prices, and any financial or market data). For general knowledge, educational topics, language help, and conversational questions, use your own knowledge base without searching the web."""
+
+    history = []
+    for msg in db_messages[:-1]:
+        role = "user" if msg["role"] == "user" else "model"
+        history.append(genai.types.Content(role=role, parts=[genai.types.Part(text=msg["content"])]))
+
+    # Build Gemini client
+    sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
+    sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
+    if sa_json or sa_b64 or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+        import json as _json
+        from google.oauth2 import service_account as _sa
+        client_kwargs = {
+            "vertexai": True,
+            "project": os.environ.get('GCP_PROJECT_ID'),
+            "location": os.environ.get('GCP_LOCATION', 'us-central1'),
+        }
+        if sa_b64:
+            import base64
+            sa_json = base64.b64decode(sa_b64).decode('utf-8')
+        if sa_json:
+            creds = _sa.Credentials.from_service_account_info(
+                _json.loads(sa_json),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            client_kwargs["credentials"] = creds
+        gemini_client = genai.Client(**client_kwargs)
+    else:
+        gemini_client = genai.Client(
+            api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'),
+        )
+
+    # Prepare the assistant message object (ID generated now so we can return it)
+    assistant_message = Message(
+        conversation_id=request.conversation_id,
+        role="assistant",
+        content="",
+    )
+
+    remaining = user["credit_balance"] - CHAT_CREDIT_COST if is_authenticated else None
+
+    async def event_generator():
+        full_text = ""
+        try:
+            # Use a queue to stream chunks from the sync iterator in a background thread
+            chunk_queue: asyncio.Queue = asyncio.Queue()
+            _SENTINEL = object()
+
+            async def _produce():
+                loop = asyncio.get_event_loop()
+                def _iter():
+                    try:
+                        for chunk in gemini_client.models.generate_content_stream(
+                            model="gemini-2.0-flash",
+                            contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
+                            config=genai.types.GenerateContentConfig(
+                                system_instruction=system_message,
+                                tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
+                                    dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
+                                        mode="MODE_DYNAMIC",
+                                        dynamic_threshold=0.7,
+                                    )
+                                ))],
+                            ),
+                        ):
+                            loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+                    finally:
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
+                await asyncio.to_thread(_iter)
+
+            producer_task = asyncio.create_task(_produce())
+
+            while True:
+                item = await chunk_queue.get()
+                if item is _SENTINEL:
+                    break
+                chunk_text = item.text if item.text else ""
+                if chunk_text:
+                    full_text += chunk_text
+                    yield f"data: {json.dumps({'text': chunk_text})}\n\n"
+
+            await producer_task  # propagate any exception
+
+            # Save completed message to DB
+            assistant_message.content = full_text
+            await db.messages.insert_one(assistant_message.model_dump())
+            await db.conversations.update_one(
+                {"id": request.conversation_id},
+                {"$set": {"updated_at": datetime.now(timezone.utc)}},
+            )
+
+            logger.info(f"Stream response generated: {full_text[:50]}...")
+
+            # Send done event
+            yield f"data: {json.dumps({'done': True, 'message_id': assistant_message.id, 'credits_used': CHAT_CREDIT_COST if is_authenticated else 0, 'credit_balance': remaining})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream chat error: {str(e)}")
+            # Refund credits on failure
+            if is_authenticated:
+                await refund_credits(request.user_id, CHAT_CREDIT_COST)
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ==================== CONVERSATION MANAGEMENT ====================
