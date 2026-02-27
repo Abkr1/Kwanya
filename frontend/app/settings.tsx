@@ -139,8 +139,8 @@ export default function SettingsScreen() {
           text: t('settings.logOut'),
           style: 'destructive',
           onPress: async () => {
-            await signOut();
             router.replace('/');
+            await signOut();
           },
         },
       ],
@@ -171,8 +171,8 @@ export default function SettingsScreen() {
                       await axios.delete(`${BACKEND_URL}/api/auth/account`, {
                         headers: { Authorization: `Bearer ${token}` },
                       });
-                      await signOut();
                       router.replace('/');
+                      await signOut();
                     } catch {
                       Alert.alert(t('common.error'), t('settings.failedDelete'));
                     } finally {

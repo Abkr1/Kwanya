@@ -63,8 +63,8 @@ export default function AccountScreen() {
           text: t('account.signOut'),
           style: 'destructive',
           onPress: async () => {
-            await signOut();
             router.replace('/auth/signin');
+            await signOut();
           },
         },
       ],
