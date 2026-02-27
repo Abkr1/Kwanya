@@ -610,15 +610,28 @@ export default function KwanyaApp() {
       language: 'ha',
     });
 
-    // Helper: process SSE lines from accumulated response text
+    // Helper: process SSE lines from accumulated response text.
+    // Only processes complete lines (ending with \n) to avoid losing
+    // letters when onprogress fires mid-line.
     let processedLength = 0;
     let placeholderCreated = false;
 
-    const processSSEText = (fullText: string) => {
+    const processSSEText = (fullText: string, flush = false) => {
       const newText = fullText.substring(processedLength);
-      processedLength = fullText.length;
+      if (!newText) return;
 
-      const lines = newText.split('\n');
+      // Find the last complete line boundary
+      const lastNewline = newText.lastIndexOf('\n');
+      if (lastNewline === -1 && !flush) {
+        // No complete line yet — wait for more data
+        return;
+      }
+
+      // Only advance past complete lines (or everything on flush)
+      const toProcess = flush ? newText : newText.substring(0, lastNewline + 1);
+      processedLength += toProcess.length;
+
+      const lines = toProcess.split('\n');
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const jsonStr = line.slice(6).trim();
@@ -731,22 +744,16 @@ export default function KwanyaApp() {
         if (!reader) throw new Error('No response body');
 
         const decoder = new TextDecoder();
-        let buffer = '';
+        let accumulated = '';
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           if (cancelledRef.current) { reader.cancel(); break; }
-          buffer += decoder.decode(value, { stream: true });
-          // Process complete lines, keep partial line in buffer
-          const lastNewline = buffer.lastIndexOf('\n');
-          if (lastNewline !== -1) {
-            const complete = buffer.substring(0, lastNewline + 1);
-            buffer = buffer.substring(lastNewline + 1);
-            processSSEText(complete);
-            processedLength = 0; // reset since we pass fresh slices
-          }
+          accumulated += decoder.decode(value, { stream: true });
+          processSSEText(accumulated);
         }
-        if (buffer) { processSSEText(buffer); processedLength = 0; }
+        // Flush any remaining partial line
+        processSSEText(accumulated, true);
       } catch (error) {
         if (error instanceof Error && (error.name === 'AbortError' || cancelledRef.current)) {
           console.log('Request cancelled by user');
@@ -778,8 +785,8 @@ export default function KwanyaApp() {
 
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-              // Process any remaining data
-              processSSEText(xhr.responseText);
+              // Flush any remaining partial line
+              processSSEText(xhr.responseText, true);
               resolve();
             } else {
               let detail = '';
