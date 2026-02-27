@@ -71,6 +71,7 @@ export default function KwanyaApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -579,6 +580,15 @@ export default function KwanyaApp() {
 
     cancelledRef.current = true;
     setIsLoading(false);
+    setIsStreaming(false);
+
+    // Cache partial messages so they persist on reload
+    if (currentConversation) {
+      setMessages(prev => {
+        AsyncStorage.setItem(`kwanya_messages_${currentConversation.id}`, JSON.stringify(prev)).catch(() => {});
+        return prev;
+      });
+    }
   };
 
   const getAIResponse = async (userMessage: string, conv?: Conversation) => {
@@ -652,17 +662,13 @@ export default function KwanyaApp() {
 
       if (cancelledRef.current) return;
 
-      // Create placeholder assistant message
-      const tempId = `temp_${Date.now()}`;
-      const timestamp = new Date().toISOString();
-      setMessages(prev => [...prev, { id: tempId, role: 'assistant', content: '', timestamp }]);
-
-      // Read SSE stream
+      // Read SSE stream — placeholder message created on first chunk to avoid empty bubble
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
       const decoder = new TextDecoder();
       let buffer = '';
+      let placeholderCreated = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -685,14 +691,22 @@ export default function KwanyaApp() {
             const event = JSON.parse(jsonStr);
 
             if (event.text) {
-              // Append chunk to the last message
-              setMessages(prev => {
-                const updated = [...prev];
-                const last = { ...updated[updated.length - 1] };
-                last.content += event.text;
-                updated[updated.length - 1] = last;
-                return updated;
-              });
+              if (!placeholderCreated) {
+                // Create assistant message with first chunk — no empty bubble
+                placeholderCreated = true;
+                setIsStreaming(true);
+                const timestamp = new Date().toISOString();
+                setMessages(prev => [...prev, { id: `temp_${Date.now()}`, role: 'assistant', content: event.text, timestamp }]);
+              } else {
+                // Append subsequent chunks to the last message
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = { ...updated[updated.length - 1] };
+                  last.content += event.text;
+                  updated[updated.length - 1] = last;
+                  return updated;
+                });
+              }
             }
 
             if (event.done) {
@@ -729,6 +743,7 @@ export default function KwanyaApp() {
       Alert.alert(t('common.error'), t('chat.failedGetResponse'));
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
       abortControllerRef.current = null;
     }
   };
@@ -779,7 +794,7 @@ export default function KwanyaApp() {
   // Extracted InputArea to avoid duplication
   const renderInputArea = (containerStyle: object) => (
     <View style={containerStyle}>
-      {isLoading && !isRecording && (
+      {isLoading && !isRecording && !isStreaming && (
         <Text style={styles.thinkingText}>{t('chat.thinking')}</Text>
       )}
 
