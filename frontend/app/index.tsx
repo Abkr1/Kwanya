@@ -286,13 +286,15 @@ export default function KwanyaApp() {
   };
 
   const loadConversationHistory = async () => {
-    // 1. Show cached data instantly
-    try {
-      const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
-      if (cached) {
-        setConversationHistory(JSON.parse(cached));
-      }
-    } catch {}
+    // 1. Show cached data only on initial load (state empty) to avoid ghost flashes
+    if (conversationHistory.length === 0) {
+      try {
+        const cached = await AsyncStorage.getItem(CONVERSATIONS_CACHE_KEY);
+        if (cached) {
+          setConversationHistory(JSON.parse(cached));
+        }
+      } catch {}
+    }
 
     // 2. Fetch fresh data from server
     try {
@@ -1427,7 +1429,12 @@ export default function KwanyaApp() {
                               onPress: async () => {
                                 try {
                                   await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
-                                  setConversationHistory((prev) => prev.filter((c) => c.id !== conv.id));
+                                  setConversationHistory((prev) => {
+                                    const updated = prev.filter((c) => c.id !== conv.id);
+                                    AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+                                    return updated;
+                                  });
+                                  AsyncStorage.removeItem(`kwanya_messages_${conv.id}`).catch(() => {});
                                   if (currentConversation?.id === conv.id) {
                                     setCurrentConversation(null);
                                     setMessages([]);
@@ -1469,7 +1476,12 @@ export default function KwanyaApp() {
                                 onPress: async () => {
                                   try {
                                     await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
-                                    setConversationHistory((prev) => prev.filter((c) => c.id !== conv.id));
+                                    setConversationHistory((prev) => {
+                                      const updated = prev.filter((c) => c.id !== conv.id);
+                                      AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+                                      return updated;
+                                    });
+                                    AsyncStorage.removeItem(`kwanya_messages_${conv.id}`).catch(() => {});
                                     if (currentConversation?.id === conv.id) {
                                       setCurrentConversation(null);
                                       setMessages([]);
