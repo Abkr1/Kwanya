@@ -641,7 +641,16 @@ export default function KwanyaApp() {
           const event = JSON.parse(jsonStr);
 
           if (event.text) {
-            if (!placeholderCreated) {
+            if (event.replace) {
+              // Server retried after mid-stream 429 — replace partial content with full response
+              setMessages(prev => {
+                const updated = [...prev];
+                const last = { ...updated[updated.length - 1] };
+                last.content = event.text;
+                updated[updated.length - 1] = last;
+                return updated;
+              });
+            } else if (!placeholderCreated) {
               placeholderCreated = true;
               setIsStreaming(true);
               const timestamp = new Date().toISOString();

@@ -47,6 +47,9 @@ db = client[os.environ['DB_NAME']]
 # Google Cloud Speech-to-Text client (initialized at startup)
 speech_client = None
 
+# Google Gemini client (initialized at startup, reused across requests)
+gemini_client = None
+
 # JWT Configuration
 JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
@@ -133,11 +136,41 @@ async def transcribe_hausa_audio(wav_path: str) -> str:
 
 # ==================== LIFESPAN ====================
 
+def init_gemini_client():
+    """Initialize a single Gemini client, reused across all requests."""
+    global gemini_client
+    sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
+    sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
+    if sa_json or sa_b64 or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
+        import json as _json
+        from google.oauth2 import service_account as _sa
+        client_kwargs = {
+            "vertexai": True,
+            "project": os.environ.get('GCP_PROJECT_ID'),
+            "location": os.environ.get('GCP_LOCATION', 'us-central1'),
+        }
+        if sa_b64:
+            sa_json = base64.b64decode(sa_b64).decode('utf-8')
+        if sa_json:
+            creds = _sa.Credentials.from_service_account_info(
+                _json.loads(sa_json),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            client_kwargs["credentials"] = creds
+        gemini_client = genai.Client(**client_kwargs)
+        logger.info("Gemini client initialized (Vertex AI)")
+    else:
+        gemini_client = genai.Client(
+            api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'),
+        )
+        logger.info("Gemini client initialized (API key)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle"""
-    # Initialize Google Cloud Speech-to-Text client
     init_speech_client()
+    init_gemini_client()
     logger.info("Server ready, accepting requests")
 
     yield
@@ -626,6 +659,56 @@ CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
 FREE_MESSAGE_LIMIT = 5   # free messages for unauthenticated users
 WELCOME_BONUS_CREDITS = 25  # 5 free messages × ₦5 per message
 
+# Retry config for Gemini 429 RESOURCE_EXHAUSTED errors
+_GEMINI_MAX_RETRIES = 3
+_GEMINI_BASE_DELAY = 2  # seconds
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Check if an exception is a Gemini 429 / RESOURCE_EXHAUSTED error."""
+    msg = str(exc).lower()
+    return "429" in msg or "resource_exhausted" in msg or "resource exhausted" in msg
+
+
+async def _gemini_generate_with_retry(fn, **kwargs):
+    """Call a Gemini generate function with exponential backoff on 429 errors."""
+    for attempt in range(_GEMINI_MAX_RETRIES + 1):
+        try:
+            return await asyncio.to_thread(fn, **kwargs)
+        except Exception as e:
+            if _is_rate_limit_error(e) and attempt < _GEMINI_MAX_RETRIES:
+                delay = _GEMINI_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"Gemini rate limited (attempt {attempt + 1}), retrying in {delay}s...")
+                await asyncio.sleep(delay)
+            else:
+                raise
+
+
+def _gemini_stream_with_retry(fn, **kwargs):
+    """Call a Gemini streaming function with retry on 429.
+    Wraps the iterator so that if the first iteration raises 429,
+    the entire call is retried with backoff."""
+    for attempt in range(_GEMINI_MAX_RETRIES + 1):
+        try:
+            stream = fn(**kwargs)
+            # Force the first chunk to detect 429 errors early
+            first_chunk = next(iter(stream))
+            # Yield the first chunk, then the rest
+            def _chain():
+                yield first_chunk
+                yield from stream
+            return _chain()
+        except StopIteration:
+            # Empty stream — return empty iterator
+            return iter([])
+        except Exception as e:
+            if _is_rate_limit_error(e) and attempt < _GEMINI_MAX_RETRIES:
+                delay = _GEMINI_BASE_DELAY * (2 ** attempt)
+                logger.warning(f"Gemini stream rate limited (attempt {attempt + 1}), retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                raise
+
 
 async def deduct_credits(user_id: str, amount: int) -> bool:
     """Atomically deduct credits. Returns True if successful, False if insufficient."""
@@ -692,38 +775,13 @@ async def chat(request: ChatRequest):
         messages.reverse()  # back to chronological order
 
         # Build conversation history for Gemini
-        system_message = """You are a helpful AI assistant that speaks Hausa language.
+        system_message = """Your name is Kwanya. You are a helpful AI assistant that speaks Hausa language.
 You are friendly, knowledgeable, and culturally aware of West African contexts, particularly Nigeria.
 Respond naturally in Hausa language and provide detailed, helpful responses.
-Do not introduce yourself or mention your name; answer directly.
+When users address you by name (e.g., "Kwanya, wanene shugaban kasa?"), treat it naturally — just answer the question directly without commenting on your name.
+Do not introduce yourself or mention your name unless the user specifically asks what your name is.
 When asked religious questions (about theology, religious rulings, tafsir, fiqh, or religious debates), politely decline to answer in detail and advise the user to consult qualified religious scholars (malamai) for proper guidance. However, you firmly maintain that Islam is the true religion (addinin gaskiya).
 Only use web search for questions that require real-time or up-to-date information (e.g., current news, today's weather, live scores, recent events, current prices, exchange rates, stock prices, crypto prices, commodity prices, and any financial or market data). For general knowledge, educational topics, language help, and conversational questions, use your own knowledge base without searching the web."""
-
-        # Use Vertex AI if configured, otherwise fall back to API key
-        sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
-        sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
-        if sa_json or sa_b64 or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
-            import json as _json
-            from google.oauth2 import service_account as _sa
-            client_kwargs = {
-                "vertexai": True,
-                "project": os.environ.get('GCP_PROJECT_ID'),
-                "location": os.environ.get('GCP_LOCATION', 'us-central1'),
-            }
-            if sa_b64:
-                import base64
-                sa_json = base64.b64decode(sa_b64).decode('utf-8')
-            if sa_json:
-                creds = _sa.Credentials.from_service_account_info(
-                    _json.loads(sa_json),
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
-                )
-                client_kwargs["credentials"] = creds
-            gemini_client = genai.Client(**client_kwargs)
-        else:
-            gemini_client = genai.Client(
-                api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'),
-            )
 
         # Build history from previous messages (exclude the current user message)
         history = []
@@ -731,8 +789,8 @@ Only use web search for questions that require real-time or up-to-date informati
             role = "user" if msg["role"] == "user" else "model"
             history.append(genai.types.Content(role=role, parts=[genai.types.Part(text=msg["content"])]))
 
-        # Get response from Gemini with Google Search grounding
-        gemini_response = await asyncio.to_thread(
+        # Get response from Gemini with retry on rate limit
+        gemini_response = await _gemini_generate_with_retry(
             gemini_client.models.generate_content,
             model="gemini-2.0-flash",
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
@@ -843,32 +901,6 @@ Only use web search for questions that require real-time or up-to-date informati
         role = "user" if msg["role"] == "user" else "model"
         history.append(genai.types.Content(role=role, parts=[genai.types.Part(text=msg["content"])]))
 
-    # Build Gemini client
-    sa_json = os.environ.get('GCP_SERVICE_ACCOUNT_JSON')
-    sa_b64 = os.environ.get('GCP_SERVICE_ACCOUNT_B64')
-    if sa_json or sa_b64 or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('GCP_USE_VERTEX'):
-        import json as _json
-        from google.oauth2 import service_account as _sa
-        client_kwargs = {
-            "vertexai": True,
-            "project": os.environ.get('GCP_PROJECT_ID'),
-            "location": os.environ.get('GCP_LOCATION', 'us-central1'),
-        }
-        if sa_b64:
-            import base64
-            sa_json = base64.b64decode(sa_b64).decode('utf-8')
-        if sa_json:
-            creds = _sa.Credentials.from_service_account_info(
-                _json.loads(sa_json),
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            client_kwargs["credentials"] = creds
-        gemini_client = genai.Client(**client_kwargs)
-    else:
-        gemini_client = genai.Client(
-            api_key=os.environ.get('GEMINI_API_KEY') or os.environ.get('EMERGENT_LLM_KEY'),
-        )
-
     # Prepare the assistant message object (ID generated now so we can return it)
     assistant_message = Message(
         conversation_id=request.conversation_id,
@@ -878,47 +910,78 @@ Only use web search for questions that require real-time or up-to-date informati
 
     remaining = user["credit_balance"] - CHAT_CREDIT_COST if is_authenticated else None
 
+    gemini_kwargs = dict(
+        model="gemini-2.0-flash",
+        contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
+        config=genai.types.GenerateContentConfig(
+            system_instruction=system_message,
+            tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
+                dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
+                    mode="MODE_DYNAMIC",
+                    dynamic_threshold=0.7,
+                )
+            ))],
+        ),
+    )
+
     async def event_generator():
         full_text = ""
         try:
             # Use a queue to stream chunks from the sync iterator in a background thread
             chunk_queue: asyncio.Queue = asyncio.Queue()
             _SENTINEL = object()
+            _ERROR = object()
 
             async def _produce():
                 loop = asyncio.get_event_loop()
                 def _iter():
                     try:
-                        for chunk in gemini_client.models.generate_content_stream(
-                            model="gemini-2.0-flash",
-                            contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
-                            config=genai.types.GenerateContentConfig(
-                                system_instruction=system_message,
-                                tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
-                                    dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
-                                        mode="MODE_DYNAMIC",
-                                        dynamic_threshold=0.7,
-                                    )
-                                ))],
-                            ),
-                        ):
+                        stream = _gemini_stream_with_retry(
+                            gemini_client.models.generate_content_stream,
+                            **gemini_kwargs,
+                        )
+                        for chunk in stream:
                             loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+                    except Exception as exc:
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, (_ERROR, exc))
                     finally:
                         loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
                 await asyncio.to_thread(_iter)
 
             producer_task = asyncio.create_task(_produce())
+            stream_error = None
 
             while True:
                 item = await chunk_queue.get()
                 if item is _SENTINEL:
                     break
+                if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR:
+                    stream_error = item[1]
+                    continue
                 chunk_text = item.text if item.text else ""
                 if chunk_text:
                     full_text += chunk_text
                     yield f"data: {json.dumps({'text': chunk_text})}\n\n"
 
-            await producer_task  # propagate any exception
+            await producer_task
+
+            # If stream hit a 429 mid-way, fall back to non-streaming retry
+            if stream_error and _is_rate_limit_error(stream_error):
+                logger.warning(f"Mid-stream 429, falling back to non-streaming retry (had {len(full_text)} chars)")
+                try:
+                    fallback_response = await _gemini_generate_with_retry(
+                        gemini_client.models.generate_content,
+                        **gemini_kwargs,
+                    )
+                    fallback_text = fallback_response.text or ""
+                    # Send the full response (replacing partial stream)
+                    full_text = fallback_text
+                    yield f"data: {json.dumps({'replace': True, 'text': fallback_text})}\n\n"
+                except Exception as fallback_err:
+                    logger.error(f"Fallback also failed: {fallback_err}")
+                    raise fallback_err
+            elif stream_error:
+                raise stream_error
 
             # Save completed message to DB
             assistant_message.content = full_text
