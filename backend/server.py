@@ -685,11 +685,22 @@ async def _gemini_generate_with_retry(fn, **kwargs):
 
 
 def _gemini_stream_with_retry(fn, **kwargs):
-    """Call a Gemini streaming function with retry on 429 before first chunk.
-    Returns an iterator. Retries only apply to the initial call, not mid-stream."""
+    """Call a Gemini streaming function with retry on 429.
+    Wraps the iterator so that if the first iteration raises 429,
+    the entire call is retried with backoff."""
     for attempt in range(_GEMINI_MAX_RETRIES + 1):
         try:
-            return fn(**kwargs)
+            stream = fn(**kwargs)
+            # Force the first chunk to detect 429 errors early
+            first_chunk = next(iter(stream))
+            # Yield the first chunk, then the rest
+            def _chain():
+                yield first_chunk
+                yield from stream
+            return _chain()
+        except StopIteration:
+            # Empty stream — return empty iterator
+            return iter([])
         except Exception as e:
             if _is_rate_limit_error(e) and attempt < _GEMINI_MAX_RETRIES:
                 delay = _GEMINI_BASE_DELAY * (2 ** attempt)
