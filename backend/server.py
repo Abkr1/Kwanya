@@ -909,12 +909,27 @@ Only use web search for questions that require real-time or up-to-date informati
 
     remaining = user["credit_balance"] - CHAT_CREDIT_COST if is_authenticated else None
 
+    gemini_kwargs = dict(
+        model="gemini-2.0-flash",
+        contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
+        config=genai.types.GenerateContentConfig(
+            system_instruction=system_message,
+            tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
+                dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
+                    mode="MODE_DYNAMIC",
+                    dynamic_threshold=0.7,
+                )
+            ))],
+        ),
+    )
+
     async def event_generator():
         full_text = ""
         try:
             # Use a queue to stream chunks from the sync iterator in a background thread
             chunk_queue: asyncio.Queue = asyncio.Queue()
             _SENTINEL = object()
+            _ERROR = object()
 
             async def _produce():
                 loop = asyncio.get_event_loop()
@@ -922,36 +937,50 @@ Only use web search for questions that require real-time or up-to-date informati
                     try:
                         stream = _gemini_stream_with_retry(
                             gemini_client.models.generate_content_stream,
-                            model="gemini-2.0-flash",
-                            contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
-                            config=genai.types.GenerateContentConfig(
-                                system_instruction=system_message,
-                                tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
-                                    dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
-                                        mode="MODE_DYNAMIC",
-                                        dynamic_threshold=0.7,
-                                    )
-                                ))],
-                            ),
+                            **gemini_kwargs,
                         )
                         for chunk in stream:
                             loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+                    except Exception as exc:
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, (_ERROR, exc))
                     finally:
                         loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
                 await asyncio.to_thread(_iter)
 
             producer_task = asyncio.create_task(_produce())
+            stream_error = None
 
             while True:
                 item = await chunk_queue.get()
                 if item is _SENTINEL:
                     break
+                if isinstance(item, tuple) and len(item) == 2 and item[0] is _ERROR:
+                    stream_error = item[1]
+                    continue
                 chunk_text = item.text if item.text else ""
                 if chunk_text:
                     full_text += chunk_text
                     yield f"data: {json.dumps({'text': chunk_text})}\n\n"
 
-            await producer_task  # propagate any exception
+            await producer_task
+
+            # If stream hit a 429 mid-way, fall back to non-streaming retry
+            if stream_error and _is_rate_limit_error(stream_error):
+                logger.warning(f"Mid-stream 429, falling back to non-streaming retry (had {len(full_text)} chars)")
+                try:
+                    fallback_response = await _gemini_generate_with_retry(
+                        gemini_client.models.generate_content,
+                        **gemini_kwargs,
+                    )
+                    fallback_text = fallback_response.text or ""
+                    # Send the full response (replacing partial stream)
+                    full_text = fallback_text
+                    yield f"data: {json.dumps({'replace': True, 'text': fallback_text})}\n\n"
+                except Exception as fallback_err:
+                    logger.error(f"Fallback also failed: {fallback_err}")
+                    raise fallback_err
+            elif stream_error:
+                raise stream_error
 
             # Save completed message to DB
             assistant_message.content = full_text
