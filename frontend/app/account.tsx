@@ -7,7 +7,6 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Platform,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
