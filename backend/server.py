@@ -1821,7 +1821,7 @@ async def initialize_payment(
                         "email": user.get("email") or f"{user['id']}@kwanya.app",
                         "name": user.get("display_name") or user.get("phone") or "Kwanya User",
                     },
-                    "payment_options": "banktransfer, ussd, nqr, opay",
+                    "payment_options": "banktransfer ussd nqr opay",
                     "customizations": {
                         "title": "Kwanya Credits",
                         "description": f"Purchase {request.credits} Kwanya credits",
