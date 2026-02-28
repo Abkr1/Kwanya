@@ -46,8 +46,12 @@ export default function CreditsScreen() {
 
   const [balance, setBalance] = useState(user?.credit_balance ?? 0);
   const [showBalance, setShowBalance] = useState(false);
+  const [activeTab, setActiveTab] = useState<'buy' | 'send'>('buy');
   const [customAmount, setCustomAmount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [transferRecipient, setTransferRecipient] = useState('');
+  const [transferAmount, setTransferAmount] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [currentPaymentRef, setCurrentPaymentRef] = useState<string | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -195,6 +199,53 @@ export default function CreditsScreen() {
     setCurrentPaymentRef(null);
   };
 
+  const transferCredits = useMemo(() => {
+    const amt = parseInt(transferAmount, 10);
+    if (!amt || amt < 50) return 0;
+    return amt;
+  }, [transferAmount]);
+
+  const handleTransfer = async () => {
+    if (!isAuthenticated || !token) {
+      Alert.alert(t('credits.signInRequired'), t('credits.signInToPurchase'));
+      return;
+    }
+    const amt = parseInt(transferAmount, 10);
+    if (!amt || amt < 50) {
+      Alert.alert(t('common.error'), t('credits.minTransfer'));
+      return;
+    }
+    if (!transferRecipient.trim()) {
+      Alert.alert(t('common.error'), t('credits.recipient'));
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      const resp = await axios.post(
+        `${BACKEND_URL}/api/credits/transfer`,
+        { recipient: transferRecipient.trim(), amount: amt },
+        { headers: authHeaders },
+      );
+      if (resp.data.success) {
+        Alert.alert(
+          t('common.success'),
+          t('credits.transferSuccess')
+            .replace('{count}', amt.toString())
+            .replace('{name}', resp.data.recipient_name),
+        );
+        setTransferRecipient('');
+        setTransferAmount('');
+        await fetchBalance();
+      }
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || t('common.error');
+      Alert.alert(t('common.error'), detail);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -259,6 +310,32 @@ export default function CreditsScreen() {
           fontSize: 12,
           color: palette.textMuted,
           marginTop: 8,
+        },
+        tabRow: {
+          flexDirection: 'row',
+          marginHorizontal: 20,
+          marginBottom: 16,
+          borderRadius: 10,
+          backgroundColor: palette.surface,
+          borderWidth: 1,
+          borderColor: palette.border,
+          overflow: 'hidden',
+        },
+        tab: {
+          flex: 1,
+          paddingVertical: 12,
+          alignItems: 'center',
+        },
+        tabActive: {
+          backgroundColor: palette.button,
+        },
+        tabText: {
+          fontSize: 14,
+          fontWeight: '600',
+          color: palette.textMuted,
+        },
+        tabTextActive: {
+          color: palette.buttonText,
         },
         section: { paddingHorizontal: 20, marginBottom: 24 },
         sectionTitle: {
@@ -560,73 +637,143 @@ export default function CreditsScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Preset Packs */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t('credits.buyCredits')}</Text>
-            {CREDIT_PACKS.map((pack) => (
-              <View key={pack.credits} style={styles.packCard}>
-                <View style={styles.packInfo}>
-                  <Text style={styles.packCredits}>{pack.label}</Text>
-                  <Text style={styles.packPrice}>{pack.priceLabel}</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.buyButton}
-                  onPress={() => handleBuy(pack.price, pack.credits)}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <ActivityIndicator size="small" color={palette.buttonText} />
-                  ) : (
-                    <Text style={styles.buyButtonText}>{t('common.buy')}</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            ))}
+          {/* Tab Switcher */}
+          <View style={styles.tabRow}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'buy' && styles.tabActive]}
+              onPress={() => setActiveTab('buy')}
+            >
+              <Text style={[styles.tabText, activeTab === 'buy' && styles.tabTextActive]}>
+                {t('credits.buyCredits')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'send' && styles.tabActive]}
+              onPress={() => setActiveTab('send')}
+            >
+              <Text style={[styles.tabText, activeTab === 'send' && styles.tabTextActive]}>
+                {t('credits.sendCredits')}
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Custom Amount */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t('credits.customAmount')}</Text>
-            <View style={styles.customCard}>
-              <Text style={styles.customLabel}>{t('credits.amountNGN')}</Text>
-              <TextInput
-                style={styles.customInput}
-                value={customAmount}
-                onChangeText={setCustomAmount}
-                placeholder={`Min \u20A6${MIN_AMOUNT}`}
-                placeholderTextColor={palette.textSubtle}
-                keyboardType="numeric"
-              />
-              {customCredits > 0 && (
-                <Text style={styles.customCreditsText}>
-                  {t('credits.youllGet').replace('{count}', customCredits.toLocaleString())}
-                </Text>
-              )}
-              <TouchableOpacity
-                style={[
-                  styles.customBuyButton,
-                  customCredits === 0 && styles.customBuyButtonDisabled,
-                ]}
-                onPress={() => {
-                  const amt = parseFloat(customAmount);
-                  if (amt >= MIN_AMOUNT && customCredits > 0) {
-                    handleBuy(amt, customCredits);
-                  }
-                }}
-                disabled={customCredits === 0 || isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color={palette.buttonText} />
-                ) : (
-                  <Text style={styles.customBuyButtonText}>
-                    {customCredits > 0
-                      ? t('credits.buyCount').replace('{count}', customCredits.toLocaleString())
-                      : t('credits.enterAmount')}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+          {activeTab === 'buy' ? (
+            <>
+              {/* Preset Packs */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{t('credits.buyCredits')}</Text>
+                {CREDIT_PACKS.map((pack) => (
+                  <View key={pack.credits} style={styles.packCard}>
+                    <View style={styles.packInfo}>
+                      <Text style={styles.packCredits}>{pack.label}</Text>
+                      <Text style={styles.packPrice}>{pack.priceLabel}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.buyButton}
+                      onPress={() => handleBuy(pack.price, pack.credits)}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <ActivityIndicator size="small" color={palette.buttonText} />
+                      ) : (
+                        <Text style={styles.buyButtonText}>{t('common.buy')}</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+
+              {/* Custom Amount */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{t('credits.customAmount')}</Text>
+                <View style={styles.customCard}>
+                  <Text style={styles.customLabel}>{t('credits.amountNGN')}</Text>
+                  <TextInput
+                    style={styles.customInput}
+                    value={customAmount}
+                    onChangeText={setCustomAmount}
+                    placeholder={`Min \u20A6${MIN_AMOUNT}`}
+                    placeholderTextColor={palette.textSubtle}
+                    keyboardType="numeric"
+                  />
+                  {customCredits > 0 && (
+                    <Text style={styles.customCreditsText}>
+                      {t('credits.youllGet').replace('{count}', customCredits.toLocaleString())}
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    style={[
+                      styles.customBuyButton,
+                      customCredits === 0 && styles.customBuyButtonDisabled,
+                    ]}
+                    onPress={() => {
+                      const amt = parseFloat(customAmount);
+                      if (amt >= MIN_AMOUNT && customCredits > 0) {
+                        handleBuy(amt, customCredits);
+                      }
+                    }}
+                    disabled={customCredits === 0 || isLoading}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator size="small" color={palette.buttonText} />
+                    ) : (
+                      <Text style={styles.customBuyButtonText}>
+                        {customCredits > 0
+                          ? t('credits.buyCount').replace('{count}', customCredits.toLocaleString())
+                          : t('credits.enterAmount')}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Send Credits */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{t('credits.sendCredits')}</Text>
+                <View style={styles.customCard}>
+                  <Text style={styles.customLabel}>{t('credits.recipient')}</Text>
+                  <TextInput
+                    style={styles.customInput}
+                    value={transferRecipient}
+                    onChangeText={setTransferRecipient}
+                    placeholder={t('credits.recipient')}
+                    placeholderTextColor={palette.textSubtle}
+                    keyboardType="default"
+                    autoCapitalize="none"
+                  />
+                  <Text style={styles.customLabel}>{t('credits.sendAmount')}</Text>
+                  <TextInput
+                    style={styles.customInput}
+                    value={transferAmount}
+                    onChangeText={setTransferAmount}
+                    placeholder="Min 50"
+                    placeholderTextColor={palette.textSubtle}
+                    keyboardType="numeric"
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.customBuyButton,
+                      transferCredits === 0 && styles.customBuyButtonDisabled,
+                    ]}
+                    onPress={handleTransfer}
+                    disabled={transferCredits === 0 || isSending}
+                  >
+                    {isSending ? (
+                      <ActivityIndicator size="small" color={palette.buttonText} />
+                    ) : (
+                      <Text style={styles.customBuyButtonText}>
+                        {transferCredits > 0
+                          ? t('credits.send').replace('{count}', transferCredits.toLocaleString())
+                          : t('credits.sendCredits')}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

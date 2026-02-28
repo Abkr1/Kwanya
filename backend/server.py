@@ -186,6 +186,10 @@ async def ensure_indexes():
     await db.login_attempts.create_index("identifier")
     await db.password_reset_codes.create_index("identifier")
 
+    # Credit transfers — queried by sender or recipient
+    await db.credit_transfers.create_index("sender_id")
+    await db.credit_transfers.create_index("recipient_id")
+
     logger.info("MongoDB indexes ensured")
 
 
@@ -323,6 +327,11 @@ class ConversationCreate(BaseModel):
 class InitPaymentRequest(BaseModel):
     amount: float
     credits: int
+
+
+class TransferCreditsRequest(BaseModel):
+    recipient: str  # phone number or email
+    amount: int     # credits to send
 
 
 # ==================== USER & AUTH MODELS ====================
@@ -1908,6 +1917,77 @@ async def verify_payment(
     except Exception as e:
         logger.error(f"Flutterwave verify error for ref={payment_reference}: {str(e)}")
         return {"success": True, "status": "pending"}
+
+
+@api_router.post("/credits/transfer")
+async def transfer_credits(
+    request: TransferCreditsRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Transfer credits from authenticated user to another user by phone or email"""
+    sender = await get_current_user(authorization)
+    if not sender:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if request.amount < 50:
+        raise HTTPException(status_code=400, detail="Minimum transfer is 50 credits")
+
+    # Determine if recipient identifier is phone or email
+    recipient_value = request.recipient.strip()
+    if not recipient_value:
+        raise HTTPException(status_code=400, detail="Recipient is required")
+
+    # If it looks like a phone number (starts with digit, +, or 0, and mostly digits)
+    digits_only = re.sub(r'[^\d]', '', recipient_value)
+    is_phone = len(digits_only) >= 7 and (recipient_value[0] in '0123456789+')
+
+    if is_phone:
+        normalized = normalize_phone(recipient_value)
+        recipient = await db.users.find_one(
+            {"phone": normalized, "id": {"$ne": sender["id"]}}, {"_id": 0}
+        )
+    else:
+        normalized_email = recipient_value.lower()
+        recipient = await db.users.find_one(
+            {"email": normalized_email, "id": {"$ne": sender["id"]}}, {"_id": 0}
+        )
+
+    if not recipient:
+        # Check if recipient is actually the sender
+        if is_phone:
+            self_check = await db.users.find_one({"phone": normalize_phone(recipient_value), "id": sender["id"]})
+        else:
+            self_check = await db.users.find_one({"email": recipient_value.lower(), "id": sender["id"]})
+        if self_check:
+            raise HTTPException(status_code=400, detail="Cannot send credits to yourself")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Atomically deduct from sender
+    deduct_result = await db.users.update_one(
+        {"id": sender["id"], "credit_balance": {"$gte": request.amount}},
+        {"$inc": {"credit_balance": -request.amount}},
+    )
+    if deduct_result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="Insufficient credits")
+
+    # Credit recipient
+    await db.users.update_one(
+        {"id": recipient["id"]},
+        {"$inc": {"credit_balance": request.amount}},
+    )
+
+    # Log transfer for audit trail
+    transfer_record = {
+        "id": str(uuid.uuid4()),
+        "sender_id": sender["id"],
+        "recipient_id": recipient["id"],
+        "amount": request.amount,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.credit_transfers.insert_one(transfer_record)
+
+    recipient_name = recipient.get("display_name") or recipient.get("email") or recipient.get("phone") or "User"
+    return {"success": True, "recipient_name": recipient_name, "amount": request.amount}
 
 
 # ==================== FLUTTERWAVE WEBHOOK ====================
