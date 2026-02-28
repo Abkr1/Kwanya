@@ -62,14 +62,9 @@ TERMII_SENDER_ID = os.environ.get("TERMII_SENDER_ID", "Kwanya")
 # Resend Email Configuration
 TERMII_EMAIL_CONFIG_ID = os.environ.get("TERMII_EMAIL_CONFIG_ID", "")
 
-# Monnify Configuration
-MONNIFY_API_KEY = os.environ.get("MONNIFY_API_KEY", "")
-MONNIFY_SECRET_KEY = os.environ.get("MONNIFY_SECRET_KEY", "")
-MONNIFY_CONTRACT_CODE = os.environ.get("MONNIFY_CONTRACT_CODE", "")
-MONNIFY_BASE_URL = os.environ.get("MONNIFY_BASE_URL", "https://sandbox.monnify.com")
-
-# Monnify token cache
-_monnify_token_cache: dict = {"token": None, "expires_at": 0.0}
+# Flutterwave Configuration
+FLUTTERWAVE_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY", "")
+FLUTTERWAVE_WEBHOOK_HASH = os.environ.get("FLUTTERWAVE_WEBHOOK_HASH", "")
 
 # ==================== GOOGLE CLOUD SPEECH-TO-TEXT (Hausa) ====================
 
@@ -190,6 +185,10 @@ async def ensure_indexes():
     await db.email_codes.create_index("email")
     await db.login_attempts.create_index("identifier")
     await db.password_reset_codes.create_index("identifier")
+
+    # Credit transfers — queried by sender or recipient
+    await db.credit_transfers.create_index("sender_id")
+    await db.credit_transfers.create_index("recipient_id")
 
     logger.info("MongoDB indexes ensured")
 
@@ -328,6 +327,11 @@ class ConversationCreate(BaseModel):
 class InitPaymentRequest(BaseModel):
     amount: float
     credits: int
+
+
+class TransferCreditsRequest(BaseModel):
+    recipient: str  # phone number or email
+    amount: int     # credits to send
 
 
 # ==================== USER & AUTH MODELS ====================
@@ -1767,29 +1771,6 @@ async def delete_account(authorization: Optional[str] = Header(None)):
     return {"success": True, "message": "Account deleted successfully"}
 
 
-# ==================== MONNIFY HELPERS ====================
-
-async def get_monnify_token() -> str:
-    """Get Monnify access token, caching for 4 minutes"""
-    now = time.time()
-    if _monnify_token_cache["token"] and _monnify_token_cache["expires_at"] > now:
-        return _monnify_token_cache["token"]
-
-    credentials = base64.b64encode(f"{MONNIFY_API_KEY}:{MONNIFY_SECRET_KEY}".encode()).decode()
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            f"{MONNIFY_BASE_URL}/api/v1/auth/login",
-            headers={"Authorization": f"Basic {credentials}"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-    token = data["responseBody"]["accessToken"]
-    _monnify_token_cache["token"] = token
-    _monnify_token_cache["expires_at"] = now + 240  # 4 minutes
-    return token
-
-
 # ==================== CREDITS ENDPOINTS ====================
 
 @api_router.get("/credits/balance")
@@ -1808,7 +1789,7 @@ async def initialize_payment(
     request: InitPaymentRequest,
     authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
 ):
-    """Initialize a Monnify payment transaction"""
+    """Initialize a Flutterwave payment transaction"""
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -1816,7 +1797,7 @@ async def initialize_payment(
     if request.amount < 100:
         raise HTTPException(status_code=400, detail="Minimum amount is N100")
 
-    if not MONNIFY_API_KEY or not MONNIFY_SECRET_KEY:
+    if not FLUTTERWAVE_SECRET_KEY:
         raise HTTPException(status_code=500, detail="Payment gateway not configured")
 
     payment_reference = f"KWANYA-{uuid.uuid4().hex[:12].upper()}"
@@ -1828,59 +1809,54 @@ async def initialize_payment(
         "amount": request.amount,
         "credits": request.credits,
         "payment_reference": payment_reference,
-        "transaction_reference": None,
         "status": "pending",
         "created_at": datetime.now(timezone.utc),
         "completed_at": None,
     }
     await db.transactions.insert_one(transaction)
 
-    # Initialize with Monnify
+    # Initialize with Flutterwave
     try:
-        token = await get_monnify_token()
         async with httpx.AsyncClient(timeout=15) as http_client:
             resp = await http_client.post(
-                f"{MONNIFY_BASE_URL}/api/v1/merchant/transactions/init-transaction",
-                headers={"Authorization": f"Bearer {token}"},
+                "https://api.flutterwave.com/v3/payments",
+                headers={"Authorization": f"Bearer {FLUTTERWAVE_SECRET_KEY}"},
                 json={
+                    "tx_ref": payment_reference,
                     "amount": request.amount,
-                    "customerName": user.get("display_name") or user.get("email") or user.get("phone") or "Kwanya User",
-                    "customerEmail": user.get("email") or f"{user['id']}@kwanya.app",
-                    "paymentReference": payment_reference,
-                    "paymentDescription": f"Purchase {request.credits} Kwanya credits",
-                    "currencyCode": "NGN",
-                    "contractCode": MONNIFY_CONTRACT_CODE,
-                    "redirectUrl": "https://kwanya.app/payment/complete",
+                    "currency": "NGN",
+                    "redirect_url": "https://kwanya.app/payment/complete",
+                    "customer": {
+                        "email": user.get("email") or f"{user['id']}@kwanya.app",
+                        "name": user.get("display_name") or user.get("phone") or "Kwanya User",
+                    },
+                    "payment_options": "banktransfer, ussd, nqr, opay",
+                    "customizations": {
+                        "title": "Kwanya Credits",
+                        "description": f"Purchase {request.credits} Kwanya credits",
+                    },
                 },
             )
             resp.raise_for_status()
-            monnify_data = resp.json()
+            fw_data = resp.json()
 
-        checkout_url = monnify_data["responseBody"]["checkoutUrl"]
-        tx_ref = monnify_data["responseBody"].get("transactionReference")
-
-        # Update transaction with Monnify reference
-        await db.transactions.update_one(
-            {"payment_reference": payment_reference},
-            {"$set": {"transaction_reference": tx_ref}},
-        )
+        checkout_url = fw_data["data"]["link"]
 
         return {
             "success": True,
             "checkout_url": checkout_url,
             "payment_reference": payment_reference,
-            "transaction_reference": tx_ref,
         }
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"Monnify init error: {e.response.text}")
+        logger.error(f"Flutterwave init error: {e.response.text}")
         await db.transactions.update_one(
             {"payment_reference": payment_reference},
             {"$set": {"status": "failed"}},
         )
         raise HTTPException(status_code=502, detail="Payment initialization failed")
     except Exception as e:
-        logger.error(f"Monnify init error: {str(e)}")
+        logger.error(f"Flutterwave init error: {str(e)}")
         raise HTTPException(status_code=502, detail="Payment initialization failed")
 
 
@@ -1906,23 +1882,24 @@ async def verify_payment(
     if transaction["status"] == "completed":
         return {"success": True, "status": "completed", "credits": transaction["credits"]}
 
-    # Verify with Monnify API
+    # Verify with Flutterwave API
     try:
-        token = await get_monnify_token()
         async with httpx.AsyncClient(timeout=15) as http_client:
             resp = await http_client.get(
-                f"{MONNIFY_BASE_URL}/api/v2/merchant/transactions/query",
-                params={"paymentReference": payment_reference},
-                headers={"Authorization": f"Bearer {token}"},
+                "https://api.flutterwave.com/v3/transactions/verify_by_reference",
+                params={"tx_ref": payment_reference},
+                headers={"Authorization": f"Bearer {FLUTTERWAVE_SECRET_KEY}"},
             )
             resp.raise_for_status()
-            monnify_data = resp.json()
+            fw_data = resp.json()
 
-        body = monnify_data.get("responseBody", {})
-        payment_status = body.get("paymentStatus", "")
-        logger.info(f"Monnify verify ref={payment_reference}: status={payment_status}, amountPaid={body.get('amountPaid')}, response={monnify_data.get('responseMessage')}")
+        data = fw_data.get("data", {})
+        payment_status = data.get("status", "")
+        amount = float(data.get("amount", 0))
+        currency = data.get("currency", "")
+        logger.info(f"Flutterwave verify ref={payment_reference}: status={payment_status}, amount={amount}, currency={currency}")
 
-        if payment_status == "PAID" and body.get("amountPaid", 0) >= transaction["amount"]:
+        if payment_status == "successful" and amount >= transaction["amount"] and currency == "NGN":
             # Atomically credit user (idempotent via pending filter)
             result = await db.transactions.update_one(
                 {"payment_reference": payment_reference, "status": "pending"},
@@ -1938,150 +1915,123 @@ async def verify_payment(
         return {"success": True, "status": "pending"}
 
     except Exception as e:
-        logger.error(f"Monnify verify error for ref={payment_reference}: {str(e)}")
+        logger.error(f"Flutterwave verify error for ref={payment_reference}: {str(e)}")
         return {"success": True, "status": "pending"}
 
 
-# ==================== MONNIFY OFFLINE PAYMENT & WEBHOOK ====================
+@api_router.post("/credits/transfer")
+async def transfer_credits(
+    request: TransferCreditsRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
+    """Transfer credits from authenticated user to another user by phone or email"""
+    sender = await get_current_user(authorization)
+    if not sender:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-@app.post("/api/monnify/verify-payer")
-async def monnify_verify_payer(request: Request):
-    """Payer verification endpoint for Monnify offline payments.
-    Called when a customer pays at a Moniepoint agent location."""
-    try:
-        data = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=200,
-            content={"responseCode": "01", "responseMessage": "Invalid request"},
+    if request.amount < 50:
+        raise HTTPException(status_code=400, detail="Minimum transfer is 50 credits")
+
+    # Determine if recipient identifier is phone or email
+    recipient_value = request.recipient.strip()
+    if not recipient_value:
+        raise HTTPException(status_code=400, detail="Recipient is required")
+
+    # If it looks like a phone number (starts with digit, +, or 0, and mostly digits)
+    digits_only = re.sub(r'[^\d]', '', recipient_value)
+    is_phone = len(digits_only) >= 7 and (recipient_value[0] in '0123456789+')
+
+    if is_phone:
+        normalized = normalize_phone(recipient_value)
+        recipient = await db.users.find_one(
+            {"phone": normalized, "id": {"$ne": sender["id"]}}, {"_id": 0}
+        )
+    else:
+        normalized_email = recipient_value.lower()
+        recipient = await db.users.find_one(
+            {"email": normalized_email, "id": {"$ne": sender["id"]}}, {"_id": 0}
         )
 
-    customer_id = data.get("customerId", "")
-    product_code = data.get("productCode", "")
+    if not recipient:
+        # Check if recipient is actually the sender
+        if is_phone:
+            self_check = await db.users.find_one({"phone": normalize_phone(recipient_value), "id": sender["id"]})
+        else:
+            self_check = await db.users.find_one({"email": recipient_value.lower(), "id": sender["id"]})
+        if self_check:
+            raise HTTPException(status_code=400, detail="Cannot send credits to yourself")
+        raise HTTPException(status_code=404, detail="User not found")
 
-    if not customer_id:
-        return JSONResponse(
-            status_code=200,
-            content={"responseCode": "01", "responseMessage": "Customer ID is required"},
-        )
+    # Atomically deduct from sender
+    deduct_result = await db.users.update_one(
+        {"id": sender["id"], "credit_balance": {"$gte": request.amount}},
+        {"$inc": {"credit_balance": -request.amount}},
+    )
+    if deduct_result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="Insufficient credits")
 
-    # Look up user by phone number (normalized), email, or user ID
-    normalized_cid = normalize_phone(customer_id) if any(c.isdigit() for c in customer_id) and "@" not in customer_id else customer_id
-    user = await db.users.find_one({
-        "$or": [
-            {"phone": normalized_cid},
-            {"email": customer_id},
-            {"id": customer_id},
-        ]
-    })
-
-    if not user:
-        logger.warning(f"Monnify payer verification failed — customer not found: {customer_id}")
-        return JSONResponse(
-            status_code=200,
-            content={"responseCode": "01", "responseMessage": "Customer not found"},
-        )
-
-    display_name = user.get("display_name") or user.get("phone") or user.get("email") or "Kwanya User"
-
-    logger.info(f"Monnify payer verified: {customer_id} → {display_name}")
-    return JSONResponse(
-        status_code=200,
-        content={
-            "responseCode": "00",
-            "responseMessage": "Success",
-            "customerName": display_name,
-        },
+    # Credit recipient
+    await db.users.update_one(
+        {"id": recipient["id"]},
+        {"$inc": {"credit_balance": request.amount}},
     )
 
+    # Log transfer for audit trail
+    transfer_record = {
+        "id": str(uuid.uuid4()),
+        "sender_id": sender["id"],
+        "recipient_id": recipient["id"],
+        "amount": request.amount,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.credit_transfers.insert_one(transfer_record)
 
-@app.post("/api/webhooks/monnify")
-async def monnify_webhook(request: Request):
-    """Handle Monnify payment webhook notifications (online and offline)"""
-    body = await request.body()
+    recipient_name = recipient.get("display_name") or recipient.get("email") or recipient.get("phone") or "User"
+    return {"success": True, "recipient_name": recipient_name, "amount": request.amount}
 
-    # Verify Monnify signature
-    if MONNIFY_SECRET_KEY:
-        signature = request.headers.get("monnify-signature", "")
-        computed = hmac.new(
-            MONNIFY_SECRET_KEY.encode(), body, hashlib.sha512
-        ).hexdigest()
-        if not hmac.compare_digest(computed, signature):
-            logger.warning("Monnify webhook signature mismatch")
-            raise HTTPException(status_code=401, detail="Invalid signature")
 
-    payload = json.loads(body)
-    event_type = payload.get("eventType", "")
-    event_data = payload.get("eventData", {})
-    payment_reference = event_data.get("paymentReference", "")
-    payment_status = event_data.get("paymentStatus", "")
-    amount_paid = float(event_data.get("amountPaid", 0))
+# ==================== FLUTTERWAVE WEBHOOK ====================
 
-    logger.info(f"Monnify webhook: event={event_type}, ref={payment_reference}, status={payment_status}, amount={amount_paid}")
+@app.post("/api/webhooks/flutterwave")
+async def flutterwave_webhook(request: Request):
+    """Handle Flutterwave payment webhook notifications"""
+    # Verify webhook hash
+    if FLUTTERWAVE_WEBHOOK_HASH:
+        signature = request.headers.get("verif-hash", "")
+        if signature != FLUTTERWAVE_WEBHOOK_HASH:
+            logger.warning("Flutterwave webhook hash mismatch")
+            raise HTTPException(status_code=401, detail="Invalid webhook hash")
 
-    if not payment_reference:
+    payload = await request.json()
+    event_data = payload.get("data", {})
+    tx_ref = event_data.get("tx_ref", "")
+    status = event_data.get("status", "")
+    amount = float(event_data.get("amount", 0))
+
+    logger.info(f"Flutterwave webhook: tx_ref={tx_ref}, status={status}, amount={amount}")
+
+    if not tx_ref:
         return {"status": "ignored"}
 
-    # Check for existing transaction (online payment flow)
-    transaction = await db.transactions.find_one({"payment_reference": payment_reference})
+    transaction = await db.transactions.find_one({"payment_reference": tx_ref})
+    if not transaction:
+        logger.warning(f"Flutterwave webhook — transaction not found for tx_ref: {tx_ref}")
+        return {"status": "ignored"}
 
-    if transaction:
-        # Online payment — match existing transaction
-        if (payment_status == "PAID" or event_type == "SUCCESSFUL_TRANSACTION") and amount_paid >= transaction["amount"]:
-            result = await db.transactions.update_one(
-                {"payment_reference": payment_reference, "status": "pending"},
-                {"$set": {
-                    "status": "completed",
-                    "completed_at": datetime.now(timezone.utc),
-                    "transaction_reference": event_data.get("transactionReference"),
-                }},
+    if status == "successful" and amount >= transaction["amount"]:
+        result = await db.transactions.update_one(
+            {"payment_reference": tx_ref, "status": "pending"},
+            {"$set": {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc),
+            }},
+        )
+        if result.modified_count > 0:
+            await db.users.update_one(
+                {"id": transaction["user_id"]},
+                {"$inc": {"credit_balance": transaction["credits"]}},
             )
-            if result.modified_count > 0:
-                await db.users.update_one(
-                    {"id": transaction["user_id"]},
-                    {"$inc": {"credit_balance": transaction["credits"]}},
-                )
-                logger.info(f"Credited {transaction['credits']} credits to user {transaction['user_id']}")
-    else:
-        # Offline payment — no pre-existing transaction, create one from webhook data
-        if payment_status == "PAID" or event_type == "SUCCESSFUL_TRANSACTION":
-            customer_id = event_data.get("customer", {}).get("email") or event_data.get("customer", {}).get("name", "")
-            product_code = event_data.get("productCode", "")
-
-            # Find user by customer identifier
-            user = await db.users.find_one({
-                "$or": [
-                    {"phone": customer_id},
-                    {"email": customer_id},
-                    {"id": customer_id},
-                ]
-            }) if customer_id else None
-
-            if user and amount_paid > 0:
-                OFFLINE_BONUS_CREDITS = 30
-                credits = int(amount_paid) + OFFLINE_BONUS_CREDITS  # 1:1 ratio + 30 bonus
-
-                # Idempotency check — don't process same reference twice
-                existing = await db.transactions.find_one({"payment_reference": payment_reference})
-                if not existing:
-                    await db.transactions.insert_one({
-                        "user_id": user["id"],
-                        "payment_reference": payment_reference,
-                        "transaction_reference": event_data.get("transactionReference"),
-                        "amount": amount_paid,
-                        "credits": credits,
-                        "status": "completed",
-                        "type": "offline",
-                        "created_at": datetime.now(timezone.utc),
-                        "completed_at": datetime.now(timezone.utc),
-                    })
-                    await db.users.update_one(
-                        {"id": user["id"]},
-                        {"$inc": {"credit_balance": credits}},
-                    )
-                    logger.info(f"Offline payment: credited {credits} credits ({int(amount_paid)} + {OFFLINE_BONUS_CREDITS} bonus) to user {user['id']}")
-            else:
-                logger.warning(f"Offline webhook — could not match user for ref: {payment_reference}, customer: {customer_id}")
+            logger.info(f"Credited {transaction['credits']} credits to user {transaction['user_id']}")
 
     return {"status": "ok"}
 

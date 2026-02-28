@@ -54,6 +54,12 @@ export default function AccountScreen() {
   }, [router]);
 
   const handleSignOut = () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(t('account.signOutConfirm'))) {
+        signOut().then(() => router.replace('/auth/signin'));
+      }
+      return;
+    }
     Alert.alert(
       t('account.signOut'),
       t('account.signOutConfirm'),

@@ -82,6 +82,15 @@ export const translations: Record<Language, Record<string, string>> = {
     'credits.completePayment': 'Complete Payment',
     'credits.completingPayment': 'Completing Payment',
     'credits.completeInTab': 'Complete your payment in the new tab. This page will update automatically once payment is confirmed.',
+    'credits.sendCredits': 'Send Credits',
+    'credits.recipient': 'Recipient (phone or email)',
+    'credits.sendAmount': 'Amount to send',
+    'credits.send': 'Send {count} Credits',
+    'credits.transferSuccess': 'Successfully sent {count} credits to {name}',
+    'credits.recipientNotFound': 'User not found',
+    'credits.insufficientCredits': 'Insufficient credits',
+    'credits.minTransfer': 'Minimum transfer is 50 credits',
+    'credits.cannotSendToSelf': 'Cannot send credits to yourself',
 
     // Account (account.tsx)
     'account.title': 'Account',
@@ -318,6 +327,15 @@ export const translations: Record<Language, Record<string, string>> = {
     'credits.completePayment': 'Kammala Biyan Kati',
     'credits.completingPayment': 'Ana Kammala Biyan Kati',
     'credits.completeInTab': 'Kammala biyan ku a sabon shafin. Wannan shafin zai sabunta da kansa bayan an tabbatar da biyan kati.',
+    'credits.sendCredits': 'Aika Kuɗi',
+    'credits.recipient': 'Mai karɓa (lambar waya ko imel)',
+    'credits.sendAmount': 'Adadin da za a aika',
+    'credits.send': 'Aika Kuɗi {count}',
+    'credits.transferSuccess': 'An aika kuɗi {count} zuwa {name}',
+    'credits.recipientNotFound': 'Ba a sami mai amfani ba',
+    'credits.insufficientCredits': 'Kuɗi bai isa ba',
+    'credits.minTransfer': 'Mafi ƙarancin aika shine kuɗi 50',
+    'credits.cannotSendToSelf': 'Ba za ka aika kuɗi ga kanka ba',
 
     // Account (account.tsx)
     'account.title': 'Asusu',
