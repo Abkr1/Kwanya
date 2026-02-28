@@ -121,10 +121,6 @@ export default function CreditsScreen() {
           if (pollTimerRef.current) clearInterval(pollTimerRef.current);
           setCheckoutUrl(null);
           setCurrentPaymentRef(null);
-          Alert.alert(
-            t('credits.paymentPending'),
-            t('credits.paymentPendingMessage'),
-          );
           return;
         }
         try {
