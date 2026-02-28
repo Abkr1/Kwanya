@@ -351,6 +351,7 @@ export default function CreditsScreen() {
           backgroundColor: palette.bg,
           zIndex: 200,
           paddingTop: insets.top,
+          paddingBottom: insets.bottom,
         },
         webviewHeader: {
           flexDirection: 'row',
