@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  Platform,
   ActivityIndicator,
   BackHandler,
 } from 'react-native';
@@ -130,6 +131,12 @@ export default function SettingsScreen() {
   }, [handleBack]);
 
   const handleLogout = () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(t('settings.logOutConfirm'))) {
+        signOut().then(() => router.replace('/'));
+      }
+      return;
+    }
     Alert.alert(
       t('settings.logOut'),
       t('settings.logOutConfirm'),
@@ -147,7 +154,24 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = async () => {
+    if (Platform.OS === 'web') {
+      if (!window.confirm(t('settings.deleteAccountMessage'))) return;
+      if (!window.confirm(t('settings.absolutelySureMessage'))) return;
+      setIsDeleting(true);
+      try {
+        await axios.delete(`${BACKEND_URL}/api/auth/account`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        await signOut();
+        router.replace('/');
+      } catch {
+        alert(t('settings.failedDelete'));
+      } finally {
+        setIsDeleting(false);
+      }
+      return;
+    }
     Alert.alert(
       t('settings.deleteAccount'),
       t('settings.deleteAccountMessage'),
