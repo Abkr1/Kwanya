@@ -580,6 +580,18 @@ export default function CreditsScreen() {
           onNavigationStateChange={handleWebViewNavigationChange}
           javaScriptEnabled
           domStorageEnabled
+          thirdPartyCookiesEnabled
+          mixedContentMode="compatibility"
+          originWhitelist={['https://*', 'http://*']}
+          cacheEnabled
+          startInLoadingState
+          renderLoading={() => (
+            <ActivityIndicator
+              size="large"
+              color={palette.button}
+              style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+            />
+          )}
         />
       </View>
     );
