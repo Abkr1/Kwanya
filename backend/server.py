@@ -1929,7 +1929,12 @@ async def transfer_credits(
     if not sender:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if request.amount < 50:
+    is_admin = sender.get("is_admin", False)
+
+    if request.amount < 1:
+        raise HTTPException(status_code=400, detail="Amount must be at least 1")
+
+    if not is_admin and request.amount < 50:
         raise HTTPException(status_code=400, detail="Minimum transfer is 50 credits")
 
     # Determine if recipient identifier is phone or email
