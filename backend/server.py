@@ -1967,13 +1967,14 @@ async def transfer_credits(
             raise HTTPException(status_code=400, detail="Cannot send credits to yourself")
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Atomically deduct from sender
-    deduct_result = await db.users.update_one(
-        {"id": sender["id"], "credit_balance": {"$gte": request.amount}},
-        {"$inc": {"credit_balance": -request.amount}},
-    )
-    if deduct_result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Insufficient credits")
+    # Admins mint new credits; regular users deduct from balance
+    if not is_admin:
+        deduct_result = await db.users.update_one(
+            {"id": sender["id"], "credit_balance": {"$gte": request.amount}},
+            {"$inc": {"credit_balance": -request.amount}},
+        )
+        if deduct_result.modified_count == 0:
+            raise HTTPException(status_code=400, detail="Insufficient credits")
 
     # Credit recipient
     await db.users.update_one(
