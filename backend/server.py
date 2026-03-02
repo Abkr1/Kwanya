@@ -1929,7 +1929,12 @@ async def transfer_credits(
     if not sender:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if request.amount < 50:
+    is_admin = sender.get("is_admin", False)
+
+    if request.amount < 1:
+        raise HTTPException(status_code=400, detail="Amount must be at least 1")
+
+    if not is_admin and request.amount < 50:
         raise HTTPException(status_code=400, detail="Minimum transfer is 50 credits")
 
     # Determine if recipient identifier is phone or email
@@ -1962,13 +1967,14 @@ async def transfer_credits(
             raise HTTPException(status_code=400, detail="Cannot send credits to yourself")
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Atomically deduct from sender
-    deduct_result = await db.users.update_one(
-        {"id": sender["id"], "credit_balance": {"$gte": request.amount}},
-        {"$inc": {"credit_balance": -request.amount}},
-    )
-    if deduct_result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Insufficient credits")
+    # Admins mint new credits; regular users deduct from balance
+    if not is_admin:
+        deduct_result = await db.users.update_one(
+            {"id": sender["id"], "credit_balance": {"$gte": request.amount}},
+            {"$inc": {"credit_balance": -request.amount}},
+        )
+        if deduct_result.modified_count == 0:
+            raise HTTPException(status_code=400, detail="Insufficient credits")
 
     # Credit recipient
     await db.users.update_one(
