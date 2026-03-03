@@ -1432,8 +1432,7 @@ export default function KwanyaApp() {
                 style={styles.menuOption}
                 onPress={() => {
                   setSidebarVisible(false);
-                  setSidebarMounted(false);
-                  router.push('/account');
+                  setTimeout(() => router.push('/account'), 50);
                 }}
               >
                 <Ionicons name="person-outline" size={22} color={palette.textMuted} />
@@ -1445,8 +1444,7 @@ export default function KwanyaApp() {
                 style={styles.menuOption}
                 onPress={() => {
                   setSidebarVisible(false);
-                  setSidebarMounted(false);
-                  router.push('/credits');
+                  setTimeout(() => router.push('/credits'), 50);
                 }}
               >
                 <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
@@ -1467,7 +1465,7 @@ export default function KwanyaApp() {
                   color={palette.textMuted}
                 />
               </Pressable>
-              <Pressable style={styles.menuOption} onPress={() => router.push('/settings')}>
+              <Pressable style={styles.menuOption} onPress={() => { setSidebarVisible(false); setTimeout(() => router.push('/settings'), 50); }}>
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>{t('chat.settings')}</Text>
                 <View style={styles.menuOptionSpacer} />
