@@ -1908,7 +1908,7 @@ async def verify_payment(
             if result.modified_count > 0:
                 credits_to_add = transaction["credits"]
                 if user.get("is_trader"):
-                    credits_to_add = int(credits_to_add * 1.1)
+                    credits_to_add = int(credits_to_add * 1.15)
                 await db.users.update_one(
                     {"id": user["id"]},
                     {"$inc": {"credit_balance": credits_to_add}},
@@ -2039,7 +2039,7 @@ async def flutterwave_webhook(request: Request):
             buyer = await db.users.find_one({"id": transaction["user_id"]}, {"_id": 0, "is_trader": 1})
             credits_to_add = transaction["credits"]
             if buyer and buyer.get("is_trader"):
-                credits_to_add = int(credits_to_add * 1.1)
+                credits_to_add = int(credits_to_add * 1.15)
             await db.users.update_one(
                 {"id": transaction["user_id"]},
                 {"$inc": {"credit_balance": credits_to_add}},
