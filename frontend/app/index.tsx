@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   Pressable,
+  TouchableOpacity,
   FlatList,
   StyleSheet,
   KeyboardAvoidingView,
@@ -1402,11 +1403,14 @@ export default function KwanyaApp() {
       {/* Sidebar Overlay */}
       {sidebarMounted && (
         <View style={styles.sidebarOverlay} pointerEvents="box-none">
-          <AnimatedPressable
-            style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]}
+          <Pressable
+            style={StyleSheet.absoluteFill}
             onPress={() => setSidebarVisible(false)}
-          />
+          >
+            <Animated.View style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]} />
+          </Pressable>
           <Animated.View
+            pointerEvents="auto"
             style={[
               styles.sidebar,
               { transform: [{ translateX: sidebarTranslateX }] },
@@ -1415,21 +1419,22 @@ export default function KwanyaApp() {
             {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
               <Text style={styles.sidebarTitle}>{t('chat.menu')}</Text>
-              <Pressable hitSlop={8} onPress={() => setSidebarVisible(false)}>
+              <TouchableOpacity hitSlop={8} onPress={() => setSidebarVisible(false)}>
                 <Ionicons name="close" size={28} color={palette.text} />
-              </Pressable>
+              </TouchableOpacity>
             </View>
 
             {/* New Chat Button */}
-            <Pressable style={styles.newChatButton} onPress={startNewChat}>
+            <TouchableOpacity style={styles.newChatButton} activeOpacity={0.6} onPress={startNewChat}>
               <Ionicons name="add-circle-outline" size={24} color={palette.text} />
               <Text style={styles.newChatText}>{t('chat.newChat')}</Text>
-            </Pressable>
+            </TouchableOpacity>
 
             {/* Menu Options */}
             <View style={styles.menuOptions}>
-              <Pressable
+              <TouchableOpacity
                 style={styles.menuOption}
+                activeOpacity={0.6}
                 onPress={() => {
                   setSidebarVisible(false);
                   setTimeout(() => router.push('/account'), 50);
@@ -1439,9 +1444,10 @@ export default function KwanyaApp() {
                 <Text style={styles.menuOptionText}>{t('chat.profile')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </Pressable>
-              <Pressable
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.menuOption}
+                activeOpacity={0.6}
                 onPress={() => {
                   setSidebarVisible(false);
                   setTimeout(() => router.push('/credits'), 50);
@@ -1451,9 +1457,10 @@ export default function KwanyaApp() {
                 <Text style={styles.menuOptionText}>{t('chat.credits')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </Pressable>
-              <Pressable
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.menuOption}
+                activeOpacity={0.6}
                 onPress={() => setThemeExpanded((prev) => !prev)}
               >
                 <Ionicons name="contrast-outline" size={22} color={palette.textMuted} />
@@ -1464,13 +1471,17 @@ export default function KwanyaApp() {
                   size={18}
                   color={palette.textMuted}
                 />
-              </Pressable>
-              <Pressable style={styles.menuOption} onPress={() => { setSidebarVisible(false); setTimeout(() => router.push('/settings'), 50); }}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuOption}
+                activeOpacity={0.6}
+                onPress={() => { setSidebarVisible(false); setTimeout(() => router.push('/settings'), 50); }}
+              >
                 <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
                 <Text style={styles.menuOptionText}>{t('chat.settings')}</Text>
                 <View style={styles.menuOptionSpacer} />
                 <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </Pressable>
+              </TouchableOpacity>
             </View>
 
             {themeExpanded && (
@@ -1546,7 +1557,8 @@ export default function KwanyaApp() {
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
                   renderItem={({ item: conv }) => (
-                    <Pressable
+                    <TouchableOpacity
+                      activeOpacity={0.6}
                       style={[
                         styles.chatHistoryItem,
                         currentConversation?.id === conv.id && styles.chatHistoryItemActive,
@@ -1633,7 +1645,7 @@ export default function KwanyaApp() {
                       >
                         <Ionicons name="trash-outline" size={16} color={palette.textMuted} />
                       </Pressable>
-                    </Pressable>
+                    </TouchableOpacity>
                   )}
                 />
               )}
