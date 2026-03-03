@@ -1906,9 +1906,12 @@ async def verify_payment(
                 {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc)}},
             )
             if result.modified_count > 0:
+                credits_to_add = transaction["credits"]
+                if user.get("is_trader"):
+                    credits_to_add = int(credits_to_add * 1.1)
                 await db.users.update_one(
                     {"id": user["id"]},
-                    {"$inc": {"credit_balance": transaction["credits"]}},
+                    {"$inc": {"credit_balance": credits_to_add}},
                 )
             return {"success": True, "status": "completed", "credits": transaction["credits"]}
 
@@ -2033,11 +2036,15 @@ async def flutterwave_webhook(request: Request):
             }},
         )
         if result.modified_count > 0:
+            buyer = await db.users.find_one({"id": transaction["user_id"]}, {"_id": 0, "is_trader": 1})
+            credits_to_add = transaction["credits"]
+            if buyer and buyer.get("is_trader"):
+                credits_to_add = int(credits_to_add * 1.1)
             await db.users.update_one(
                 {"id": transaction["user_id"]},
-                {"$inc": {"credit_balance": transaction["credits"]}},
+                {"$inc": {"credit_balance": credits_to_add}},
             )
-            logger.info(f"Credited {transaction['credits']} credits to user {transaction['user_id']}")
+            logger.info(f"Credited {credits_to_add} credits to user {transaction['user_id']} (trader bonus: {buyer and buyer.get('is_trader', False)})")
 
     return {"status": "ok"}
 
