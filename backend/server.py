@@ -1931,8 +1931,12 @@ async def verify_payment(
     if transaction["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized")
 
+    # Compute actual credits (with trader bonus) for response
+    base_credits = transaction["credits"]
+    actual_credits = int(base_credits * 1.15) if user.get("is_trader") else base_credits
+
     if transaction["status"] == "completed":
-        return {"success": True, "status": "completed", "credits": transaction["credits"]}
+        return {"success": True, "status": "completed", "credits": actual_credits}
 
     # Verify with Monnify API
     try:
@@ -1959,14 +1963,12 @@ async def verify_payment(
                 {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc)}},
             )
             if result.modified_count > 0:
-                credits_to_add = transaction["credits"]
-                if user.get("is_trader"):
-                    credits_to_add = int(credits_to_add * 1.15)
                 await db.users.update_one(
                     {"id": user["id"]},
-                    {"$inc": {"credit_balance": credits_to_add}},
+                    {"$inc": {"credit_balance": actual_credits}},
                 )
-            return {"success": True, "status": "completed", "credits": transaction["credits"]}
+                logger.info(f"Credited {actual_credits} credits to user {user['id']} (trader: {user.get('is_trader', False)})")
+            return {"success": True, "status": "completed", "credits": actual_credits}
 
         return {"success": True, "status": "pending"}
 
