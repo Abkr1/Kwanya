@@ -167,9 +167,10 @@ export default function KwanyaApp() {
   }, [userId]);
 
 
-  // Sidebar open/close animation
+  // Sidebar open/close animation — only react to sidebarVisible changes
   useEffect(() => {
     if (sidebarVisible) {
+      Keyboard.dismiss();
       setSidebarMounted(true);
       // Refresh history when sidebar opens
       if (userId) loadConversationHistory();
@@ -188,10 +189,7 @@ export default function KwanyaApp() {
           useNativeDriver: true,
         }),
       ]).start();
-      return;
-    }
-
-    if (sidebarMounted) {
+    } else {
       Animated.parallel([
         Animated.timing(sidebarTranslateX, {
           toValue: -sidebarWidth,
@@ -206,13 +204,8 @@ export default function KwanyaApp() {
         }),
       ]).start(() => setSidebarMounted(false));
     }
-  }, [
-    sidebarVisible,
-    sidebarMounted,
-    sidebarWidth,
-    sidebarTranslateX,
-    backdropOpacity,
-  ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarVisible]);
 
   // Android back button closes sidebar
   useEffect(() => {
@@ -1393,7 +1386,7 @@ export default function KwanyaApp() {
         <Pressable
           style={styles.menuButton}
           hitSlop={8}
-          onPress={() => setSidebarVisible(true)}
+          onPress={() => { Keyboard.dismiss(); setSidebarVisible(true); }}
         >
           <Ionicons name="menu" size={28} color={palette.text} />
         </Pressable>
