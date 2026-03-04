@@ -1082,17 +1082,16 @@ export default function KwanyaApp() {
       ...StyleSheet.absoluteFillObject,
       zIndex: 100,
       elevation: 100,
-      flexDirection: 'row',
     },
     sidebarBackdrop: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: palette.overlay,
     },
+    sidebarRow: {
+      ...StyleSheet.absoluteFillObject,
+      flexDirection: 'row',
+    },
     sidebar: {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      bottom: 0,
       width: windowWidth * 0.8,
       maxWidth: 320,
       backgroundColor: palette.bg,
@@ -1100,8 +1099,9 @@ export default function KwanyaApp() {
       paddingBottom: insets.bottom,
       borderRightWidth: 1,
       borderRightColor: palette.border,
-      zIndex: 101,
-      elevation: 101,
+    },
+    sidebarDismiss: {
+      flex: 1,
     },
     sidebarHeader: {
       flexDirection: 'row',
@@ -1402,20 +1402,20 @@ export default function KwanyaApp() {
 
       {/* Sidebar Overlay */}
       {sidebarMounted && (
-        <View style={styles.sidebarOverlay} pointerEvents="box-none">
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setSidebarVisible(false)}
-          >
-            <Animated.View style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]} />
-          </Pressable>
+        <View style={styles.sidebarOverlay}>
+          {/* Dark backdrop — visual only, no touch handling */}
           <Animated.View
-            pointerEvents="auto"
-            style={[
-              styles.sidebar,
-              { transform: [{ translateX: sidebarTranslateX }] },
-            ]}
-          >
+            pointerEvents="none"
+            style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]}
+          />
+          {/* Row: sidebar + dismiss area side by side (no overlap) */}
+          <View style={styles.sidebarRow}>
+            <Animated.View
+              style={[
+                styles.sidebar,
+                { transform: [{ translateX: sidebarTranslateX }] },
+              ]}
+            >
             {/* Sidebar Header */}
             <View style={styles.sidebarHeader}>
               <Text style={styles.sidebarTitle}>{t('chat.menu')}</Text>
@@ -1650,7 +1650,14 @@ export default function KwanyaApp() {
                 />
               )}
             </View>
-          </Animated.View>
+            </Animated.View>
+            {/* Tap-to-dismiss area — right of sidebar, no overlap */}
+            <TouchableOpacity
+              style={styles.sidebarDismiss}
+              activeOpacity={1}
+              onPress={() => setSidebarVisible(false)}
+            />
+          </View>
         </View>
       )}
 
