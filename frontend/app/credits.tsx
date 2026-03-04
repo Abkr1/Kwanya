@@ -160,7 +160,7 @@ export default function CreditsScreen() {
     try {
       const resp = await axios.post(
         `${BACKEND_URL}/api/credits/initialize`,
-        { amount, credits },
+        { amount },
         { headers: authHeaders },
       );
       if (resp.data.success) {
