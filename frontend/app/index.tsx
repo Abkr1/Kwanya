@@ -171,22 +171,24 @@ export default function KwanyaApp() {
   const openSidebar = useCallback(() => {
     Keyboard.dismiss();
     setSidebarVisible(true);
-    if (userId) loadConversationHistory();
     sidebarTranslateX.setValue(-sidebarWidth);
     backdropOpacity.setValue(0);
     Animated.parallel([
-      Animated.spring(sidebarTranslateX, {
+      Animated.timing(sidebarTranslateX, {
         toValue: 0,
+        duration: 250,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
-        damping: 22,
-        stiffness: 220,
       }),
       Animated.timing(backdropOpacity, {
         toValue: 1,
         duration: 200,
         useNativeDriver: true,
       }),
-    ]).start();
+    ]).start(() => {
+      // Fetch history AFTER animation settles to avoid re-render during touch
+      if (userId) loadConversationHistory();
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, sidebarWidth]);
 
