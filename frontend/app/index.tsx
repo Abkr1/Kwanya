@@ -13,6 +13,7 @@ import {
   Alert,
   Keyboard,
   ScrollView,
+  Modal,
   Animated,
   useWindowDimensions,
   Easing,
@@ -57,7 +58,7 @@ interface AudioFileUpload {
 }
 
 // Move outside component to avoid recreation on every render
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 
 export default function KwanyaApp() {
   const insets = useSafeAreaInsets();
@@ -80,7 +81,6 @@ export default function KwanyaApp() {
   const [userId, setUserId] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
-  const [sidebarMounted, setSidebarMounted] = useState(false);
   const [themeExpanded, setThemeExpanded] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
@@ -167,63 +167,64 @@ export default function KwanyaApp() {
   }, [userId]);
 
 
-  // Sidebar open/close animation — only react to sidebarVisible changes
-  useEffect(() => {
-    if (sidebarVisible) {
-      Keyboard.dismiss();
-      setSidebarMounted(true);
-      // Refresh history when sidebar opens
-      if (userId) loadConversationHistory();
-      sidebarTranslateX.setValue(-sidebarWidth);
-      backdropOpacity.setValue(0);
-      Animated.parallel([
-        Animated.spring(sidebarTranslateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 22,
-          stiffness: 220,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(sidebarTranslateX, {
-          toValue: -sidebarWidth,
-          duration: 200,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start(() => setSidebarMounted(false));
-    }
+  // Sidebar open animation
+  const openSidebar = useCallback(() => {
+    Keyboard.dismiss();
+    setSidebarVisible(true);
+    if (userId) loadConversationHistory();
+    sidebarTranslateX.setValue(-sidebarWidth);
+    backdropOpacity.setValue(0);
+    Animated.parallel([
+      Animated.spring(sidebarTranslateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 22,
+        stiffness: 220,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarVisible]);
+  }, [userId, sidebarWidth]);
+
+  const closeSidebar = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(sidebarTranslateX, {
+        toValue: -sidebarWidth,
+        duration: 200,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => setSidebarVisible(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarWidth]);
 
   // Android back button closes sidebar
   useEffect(() => {
     if (!sidebarVisible) return;
     const handler = BackHandler.addEventListener('hardwareBackPress', () => {
-      setSidebarVisible(false);
+      closeSidebar();
       return true;
     });
     return () => handler.remove();
-  }, [sidebarVisible]);
+  }, [sidebarVisible, closeSidebar]);
 
   // Reopen sidebar when navigating back from account
   useEffect(() => {
     if (params.sidebar === '1') {
-      setSidebarVisible(true);
+      // Small delay to let the screen mount before opening sidebar
+      setTimeout(() => openSidebar(), 100);
       router.setParams({ sidebar: undefined });
     }
-  }, [params.sidebar]);
+  }, [params.sidebar, openSidebar]);
 
   const copyToClipboard = async (text: string, label: string) => {
     if (!text.trim()) {
@@ -303,7 +304,7 @@ export default function KwanyaApp() {
   };
 
   const startNewChat = () => {
-    setSidebarVisible(false);
+    closeSidebar();
     setMessages([]);
     setCurrentConversation(null);
     conversationRef.current = null;
@@ -311,7 +312,7 @@ export default function KwanyaApp() {
   };
 
   const loadConversation = async (conversation: Conversation) => {
-    setSidebarVisible(false);
+    closeSidebar();
     setCurrentConversation(conversation);
 
     // 1. Show cached messages instantly
@@ -1072,9 +1073,7 @@ export default function KwanyaApp() {
       width: 36,
     },
     sidebarOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      zIndex: 100,
-      elevation: 100,
+      flex: 1,
     },
     sidebarBackdrop: {
       ...StyleSheet.absoluteFillObject,
@@ -1386,22 +1385,28 @@ export default function KwanyaApp() {
         <Pressable
           style={styles.menuButton}
           hitSlop={8}
-          onPress={() => { Keyboard.dismiss(); setSidebarVisible(true); }}
+          onPress={openSidebar}
         >
           <Ionicons name="menu" size={28} color={palette.text} />
         </Pressable>
         <View style={styles.headerRight} />
       </View>
 
-      {/* Sidebar Overlay */}
-      {sidebarMounted && (
+      {/* Sidebar Modal — fully isolated touch layer */}
+      <Modal
+        visible={sidebarVisible}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={closeSidebar}
+      >
         <View style={styles.sidebarOverlay}>
-          {/* Dark backdrop — visual only, no touch handling */}
+          {/* Backdrop */}
           <Animated.View
             pointerEvents="none"
             style={[styles.sidebarBackdrop, { opacity: backdropOpacity }]}
           />
-          {/* Row: sidebar + dismiss area side by side (no overlap) */}
+          {/* Row layout: sidebar | dismiss area */}
           <View style={styles.sidebarRow}>
             <Animated.View
               style={[
@@ -1409,202 +1414,161 @@ export default function KwanyaApp() {
                 { transform: [{ translateX: sidebarTranslateX }] },
               ]}
             >
-            {/* Sidebar Header */}
-            <View style={styles.sidebarHeader}>
-              <Text style={styles.sidebarTitle}>{t('chat.menu')}</Text>
-              <TouchableOpacity hitSlop={8} onPress={() => setSidebarVisible(false)}>
-                <Ionicons name="close" size={28} color={palette.text} />
-              </TouchableOpacity>
-            </View>
-
-            {/* New Chat Button */}
-            <TouchableOpacity style={styles.newChatButton} activeOpacity={0.6} onPress={startNewChat}>
-              <Ionicons name="add-circle-outline" size={24} color={palette.text} />
-              <Text style={styles.newChatText}>{t('chat.newChat')}</Text>
-            </TouchableOpacity>
-
-            {/* Menu Options */}
-            <View style={styles.menuOptions}>
-              <TouchableOpacity
-                style={styles.menuOption}
-                activeOpacity={0.6}
-                onPress={() => {
-                  setSidebarVisible(false);
-                  setTimeout(() => router.push('/account'), 50);
-                }}
-              >
-                <Ionicons name="person-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>{t('chat.profile')}</Text>
-                <View style={styles.menuOptionSpacer} />
-                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.menuOption}
-                activeOpacity={0.6}
-                onPress={() => {
-                  setSidebarVisible(false);
-                  setTimeout(() => router.push('/credits'), 50);
-                }}
-              >
-                <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>{t('chat.credits')}</Text>
-                <View style={styles.menuOptionSpacer} />
-                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.menuOption}
-                activeOpacity={0.6}
-                onPress={() => setThemeExpanded((prev) => !prev)}
-              >
-                <Ionicons name="contrast-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>{t('chat.theme')}</Text>
-                <View style={styles.menuOptionSpacer} />
-                <Ionicons
-                  name={themeExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={18}
-                  color={palette.textMuted}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.menuOption}
-                activeOpacity={0.6}
-                onPress={() => { setSidebarVisible(false); setTimeout(() => router.push('/settings'), 50); }}
-              >
-                <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
-                <Text style={styles.menuOptionText}>{t('chat.settings')}</Text>
-                <View style={styles.menuOptionSpacer} />
-                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            {themeExpanded && (
-              <View style={styles.themeSection}>
-                <Text style={styles.themeTitle}>{t('chat.theme')}</Text>
-                <View style={styles.themeOptionsRow}>
-                  <Pressable
-                    style={[
-                      styles.themeOptionButton,
-                      themePreference === 'light' && styles.themeOptionButtonActive,
-                    ]}
-                    onPress={() => setThemePreference('light')}
-                  >
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        themePreference === 'light' && styles.themeOptionTextActive,
-                      ]}
-                    >
-                      {t('chat.lightMode')}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.themeOptionButton,
-                      themePreference === 'dark' && styles.themeOptionButtonActive,
-                    ]}
-                    onPress={() => setThemePreference('dark')}
-                  >
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        themePreference === 'dark' && styles.themeOptionTextActive,
-                      ]}
-                    >
-                      {t('chat.darkMode')}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.themeOptionButton,
-                      themePreference === 'system' && styles.themeOptionButtonActive,
-                    ]}
-                    onPress={() => setThemePreference('system')}
-                  >
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        themePreference === 'system' && styles.themeOptionTextActive,
-                      ]}
-                    >
-                      {t('chat.system')}
-                    </Text>
-                  </Pressable>
-                </View>
+              {/* Sidebar Header */}
+              <View style={styles.sidebarHeader}>
+                <Text style={styles.sidebarTitle}>{t('chat.menu')}</Text>
+                <TouchableOpacity hitSlop={8} onPress={closeSidebar}>
+                  <Ionicons name="close" size={28} color={palette.text} />
+                </TouchableOpacity>
               </View>
-            )}
 
-            {/* Chat History */}
-            <View style={styles.chatHistorySection}>
-              <Text style={styles.chatHistoryTitle}>
-                {t('chat.chatHistory')}
-              </Text>
-              {conversationHistory.length === 0 ? (
-                <Text style={styles.noChatText}>
-                  {t('chat.noPreviousChats')}
-                </Text>
-              ) : (
-                <FlatList
-                  data={conversationHistory}
-                  keyExtractor={(item) => item.id}
-                  style={styles.chatHistoryList}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  renderItem={({ item: conv }) => (
+              {/* New Chat Button */}
+              <TouchableOpacity style={styles.newChatButton} activeOpacity={0.6} onPress={startNewChat}>
+                <Ionicons name="add-circle-outline" size={24} color={palette.text} />
+                <Text style={styles.newChatText}>{t('chat.newChat')}</Text>
+              </TouchableOpacity>
+
+              {/* Menu Options */}
+              <View style={styles.menuOptions}>
+                <TouchableOpacity
+                  style={styles.menuOption}
+                  activeOpacity={0.6}
+                  onPress={() => {
+                    closeSidebar();
+                    setTimeout(() => router.push('/account'), 250);
+                  }}
+                >
+                  <Ionicons name="person-outline" size={22} color={palette.textMuted} />
+                  <Text style={styles.menuOptionText}>{t('chat.profile')}</Text>
+                  <View style={styles.menuOptionSpacer} />
+                  <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuOption}
+                  activeOpacity={0.6}
+                  onPress={() => {
+                    closeSidebar();
+                    setTimeout(() => router.push('/credits'), 250);
+                  }}
+                >
+                  <Ionicons name="wallet-outline" size={22} color={palette.textMuted} />
+                  <Text style={styles.menuOptionText}>{t('chat.credits')}</Text>
+                  <View style={styles.menuOptionSpacer} />
+                  <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuOption}
+                  activeOpacity={0.6}
+                  onPress={() => setThemeExpanded((prev) => !prev)}
+                >
+                  <Ionicons name="contrast-outline" size={22} color={palette.textMuted} />
+                  <Text style={styles.menuOptionText}>{t('chat.theme')}</Text>
+                  <View style={styles.menuOptionSpacer} />
+                  <Ionicons
+                    name={themeExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={palette.textMuted}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuOption}
+                  activeOpacity={0.6}
+                  onPress={() => {
+                    closeSidebar();
+                    setTimeout(() => router.push('/settings'), 250);
+                  }}
+                >
+                  <Ionicons name="settings-outline" size={22} color={palette.textMuted} />
+                  <Text style={styles.menuOptionText}>{t('chat.settings')}</Text>
+                  <View style={styles.menuOptionSpacer} />
+                  <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              {themeExpanded && (
+                <View style={styles.themeSection}>
+                  <Text style={styles.themeTitle}>{t('chat.theme')}</Text>
+                  <View style={styles.themeOptionsRow}>
                     <TouchableOpacity
-                      activeOpacity={0.6}
                       style={[
-                        styles.chatHistoryItem,
-                        currentConversation?.id === conv.id && styles.chatHistoryItemActive,
+                        styles.themeOptionButton,
+                        themePreference === 'light' && styles.themeOptionButtonActive,
                       ]}
-                      onPress={() => loadConversation(conv)}
-                      onLongPress={() => {
-                        Alert.alert(
-                          t('chat.deleteChat'),
-                          t('chat.deleteChatConfirm').replace('{title}', conv.title || t('chat.newConversation')),
-                          [
-                            { text: t('common.cancel'), style: 'cancel' },
-                            {
-                              text: t('common.delete'),
-                              style: 'destructive',
-                              onPress: async () => {
-                                try {
-                                  await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
-                                  setConversationHistory((prev) => {
-                                    const updated = prev.filter((c) => c.id !== conv.id);
-                                    AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
-                                    return updated;
-                                  });
-                                  AsyncStorage.removeItem(`kwanya_messages_${conv.id}`).catch(() => {});
-                                  if (currentConversation?.id === conv.id) {
-                                    setCurrentConversation(null);
-                                    setMessages([]);
-                                  }
-                                } catch {
-                                  Alert.alert(t('common.error'), t('chat.failedDeleteConversation'));
-                                }
-                              },
-                            },
-                          ],
-                        );
-                      }}
+                      activeOpacity={0.6}
+                      onPress={() => setThemePreference('light')}
                     >
-                      <Ionicons
-                        name="chatbubble-outline"
-                        size={18}
-                        color={currentConversation?.id === conv.id ? palette.text : palette.textMuted}
-                      />
                       <Text
                         style={[
-                          styles.chatHistoryItemText,
-                          currentConversation?.id === conv.id && styles.chatHistoryItemTextActive,
+                          styles.themeOptionText,
+                          themePreference === 'light' && styles.themeOptionTextActive,
                         ]}
-                        numberOfLines={1}
                       >
-                        {conv.title || t('chat.newConversation')}
+                        {t('chat.lightMode')}
                       </Text>
-                      <Pressable
-                        style={styles.chatDeleteButton}
-                        onPress={() => {
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.themeOptionButton,
+                        themePreference === 'dark' && styles.themeOptionButtonActive,
+                      ]}
+                      activeOpacity={0.6}
+                      onPress={() => setThemePreference('dark')}
+                    >
+                      <Text
+                        style={[
+                          styles.themeOptionText,
+                          themePreference === 'dark' && styles.themeOptionTextActive,
+                        ]}
+                      >
+                        {t('chat.darkMode')}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.themeOptionButton,
+                        themePreference === 'system' && styles.themeOptionButtonActive,
+                      ]}
+                      activeOpacity={0.6}
+                      onPress={() => setThemePreference('system')}
+                    >
+                      <Text
+                        style={[
+                          styles.themeOptionText,
+                          themePreference === 'system' && styles.themeOptionTextActive,
+                        ]}
+                      >
+                        {t('chat.system')}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Chat History */}
+              <View style={styles.chatHistorySection}>
+                <Text style={styles.chatHistoryTitle}>
+                  {t('chat.chatHistory')}
+                </Text>
+                {conversationHistory.length === 0 ? (
+                  <Text style={styles.noChatText}>
+                    {t('chat.noPreviousChats')}
+                  </Text>
+                ) : (
+                  <FlatList
+                    data={conversationHistory}
+                    keyExtractor={(item) => item.id}
+                    style={styles.chatHistoryList}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="always"
+                    renderItem={({ item: conv }) => (
+                      <TouchableOpacity
+                        activeOpacity={0.6}
+                        style={[
+                          styles.chatHistoryItem,
+                          currentConversation?.id === conv.id && styles.chatHistoryItemActive,
+                        ]}
+                        onPress={() => loadConversation(conv)}
+                        onLongPress={() => {
                           Alert.alert(
                             t('chat.deleteChat'),
                             t('chat.deleteChatConfirm').replace('{title}', conv.title || t('chat.newConversation')),
@@ -1634,25 +1598,72 @@ export default function KwanyaApp() {
                             ],
                           );
                         }}
-                        hitSlop={8}
                       >
-                        <Ionicons name="trash-outline" size={16} color={palette.textMuted} />
-                      </Pressable>
-                    </TouchableOpacity>
-                  )}
-                />
-              )}
-            </View>
+                        <Ionicons
+                          name="chatbubble-outline"
+                          size={18}
+                          color={currentConversation?.id === conv.id ? palette.text : palette.textMuted}
+                        />
+                        <Text
+                          style={[
+                            styles.chatHistoryItemText,
+                            currentConversation?.id === conv.id && styles.chatHistoryItemTextActive,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {conv.title || t('chat.newConversation')}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.chatDeleteButton}
+                          hitSlop={8}
+                          onPress={() => {
+                            Alert.alert(
+                              t('chat.deleteChat'),
+                              t('chat.deleteChatConfirm').replace('{title}', conv.title || t('chat.newConversation')),
+                              [
+                                { text: t('common.cancel'), style: 'cancel' },
+                                {
+                                  text: t('common.delete'),
+                                  style: 'destructive',
+                                  onPress: async () => {
+                                    try {
+                                      await axios.delete(`${BACKEND_URL}/api/conversations/${conv.id}?user_id=${userId}`);
+                                      setConversationHistory((prev) => {
+                                        const updated = prev.filter((c) => c.id !== conv.id);
+                                        AsyncStorage.setItem(CONVERSATIONS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+                                        return updated;
+                                      });
+                                      AsyncStorage.removeItem(`kwanya_messages_${conv.id}`).catch(() => {});
+                                      if (currentConversation?.id === conv.id) {
+                                        setCurrentConversation(null);
+                                        setMessages([]);
+                                      }
+                                    } catch {
+                                      Alert.alert(t('common.error'), t('chat.failedDeleteConversation'));
+                                    }
+                                  },
+                                },
+                              ],
+                            );
+                          }}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={palette.textMuted} />
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    )}
+                  />
+                )}
+              </View>
             </Animated.View>
-            {/* Tap-to-dismiss area — right of sidebar, no overlap */}
+            {/* Tap-to-dismiss — fills remaining space, no overlap with sidebar */}
             <TouchableOpacity
               style={styles.sidebarDismiss}
               activeOpacity={1}
-              onPress={() => setSidebarVisible(false)}
+              onPress={closeSidebar}
             />
           </View>
         </View>
-      )}
+      </Modal>
 
       {messages.length === 0 ? (
         /* Empty state - welcome centered, input at bottom */
