@@ -28,6 +28,7 @@ import httpx
 import hashlib
 import hmac
 import base64
+import urllib.parse
 
 # Google Cloud Speech-to-Text for Hausa ASR
 from google.cloud import speech_v2 as cloud_speech
@@ -64,9 +65,15 @@ TERMII_SENDER_ID = os.environ.get("TERMII_SENDER_ID", "Kwanya")
 # Resend Email Configuration
 TERMII_EMAIL_CONFIG_ID = os.environ.get("TERMII_EMAIL_CONFIG_ID", "")
 
-# Flutterwave Configuration
+# Flutterwave Configuration (disabled — kept for reference)
 FLUTTERWAVE_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY", "")
 FLUTTERWAVE_WEBHOOK_HASH = os.environ.get("FLUTTERWAVE_WEBHOOK_HASH", "")
+
+# Monnify Configuration (active payment gateway)
+MONNIFY_API_KEY = os.environ.get("MONNIFY_API_KEY", "")
+MONNIFY_SECRET_KEY = os.environ.get("MONNIFY_SECRET_KEY", "")
+MONNIFY_CONTRACT_CODE = os.environ.get("MONNIFY_CONTRACT_CODE", "")
+MONNIFY_BASE_URL = os.environ.get("MONNIFY_BASE_URL", "https://api.monnify.com")
 
 # ==================== GOOGLE CLOUD SPEECH-TO-TEXT (Hausa) ====================
 
@@ -1800,6 +1807,21 @@ async def delete_account(authorization: Optional[str] = Header(None)):
     return {"success": True, "message": "Account deleted successfully"}
 
 
+# ==================== MONNIFY HELPERS ====================
+
+async def get_monnify_token() -> str:
+    """Authenticate with Monnify and return an access token."""
+    credentials = base64.b64encode(f"{MONNIFY_API_KEY}:{MONNIFY_SECRET_KEY}".encode()).decode()
+    async with httpx.AsyncClient(timeout=15) as http_client:
+        resp = await http_client.post(
+            f"{MONNIFY_BASE_URL}/api/v1/auth/login",
+            headers={"Authorization": f"Basic {credentials}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    return data["responseBody"]["accessToken"]
+
+
 # ==================== CREDITS ENDPOINTS ====================
 
 @api_router.get("/credits/balance")
@@ -1818,7 +1840,7 @@ async def initialize_payment(
     request: InitPaymentRequest,
     authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
 ):
-    """Initialize a Flutterwave payment transaction"""
+    """Initialize a Monnify payment transaction"""
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -1826,7 +1848,7 @@ async def initialize_payment(
     if request.amount < 100:
         raise HTTPException(status_code=400, detail="Minimum amount is N100")
 
-    if not FLUTTERWAVE_SECRET_KEY:
+    if not MONNIFY_API_KEY or not MONNIFY_SECRET_KEY:
         raise HTTPException(status_code=500, detail="Payment gateway not configured")
 
     payment_reference = f"KWANYA-{uuid.uuid4().hex[:12].upper()}"
@@ -1839,38 +1861,38 @@ async def initialize_payment(
         "amount": request.amount,
         "credits": credits,
         "payment_reference": payment_reference,
+        "gateway": "monnify",
         "status": "pending",
         "created_at": datetime.now(timezone.utc),
         "completed_at": None,
     }
     await db.transactions.insert_one(transaction)
 
-    # Initialize with Flutterwave
+    # Initialize with Monnify
     try:
+        access_token = await get_monnify_token()
+        customer_email = user.get("email") or f"{user['id']}@kwanya.app"
+        customer_name = user.get("display_name") or user.get("phone") or "Kwanya User"
+
         async with httpx.AsyncClient(timeout=15) as http_client:
             resp = await http_client.post(
-                "https://api.flutterwave.com/v3/payments",
-                headers={"Authorization": f"Bearer {FLUTTERWAVE_SECRET_KEY}"},
+                f"{MONNIFY_BASE_URL}/api/v1/merchant/transactions/init-transaction",
+                headers={"Authorization": f"Bearer {access_token}"},
                 json={
-                    "tx_ref": payment_reference,
                     "amount": request.amount,
-                    "currency": "NGN",
-                    "redirect_url": "https://kwanya.app/payment/complete",
-                    "customer": {
-                        "email": user.get("email") or f"{user['id']}@kwanya.app",
-                        "name": user.get("display_name") or user.get("phone") or "Kwanya User",
-                    },
-                    "payment_options": "banktransfer, ussd, nqr, opay",
-                    "customizations": {
-                        "title": "Kwanya Credits",
-                        "description": f"Purchase {credits} Kwanya credits",
-                    },
+                    "customerEmail": customer_email,
+                    "customerName": customer_name,
+                    "paymentReference": payment_reference,
+                    "contractCode": MONNIFY_CONTRACT_CODE,
+                    "currencyCode": "NGN",
+                    "redirectUrl": "https://kwanya.app/payment/complete",
+                    "paymentDescription": f"Purchase {credits} Kwanya credits",
                 },
             )
             resp.raise_for_status()
-            fw_data = resp.json()
+            mn_data = resp.json()
 
-        checkout_url = fw_data["data"]["link"]
+        checkout_url = mn_data["responseBody"]["checkoutUrl"]
 
         return {
             "success": True,
@@ -1879,14 +1901,14 @@ async def initialize_payment(
         }
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"Flutterwave init error: {e.response.text}")
+        logger.error(f"Monnify init error: {e.response.text}")
         await db.transactions.update_one(
             {"payment_reference": payment_reference},
             {"$set": {"status": "failed"}},
         )
         raise HTTPException(status_code=502, detail="Payment initialization failed")
     except Exception as e:
-        logger.error(f"Flutterwave init error: {str(e)}")
+        logger.error(f"Monnify init error: {str(e)}")
         raise HTTPException(status_code=502, detail="Payment initialization failed")
 
 
@@ -1912,24 +1934,25 @@ async def verify_payment(
     if transaction["status"] == "completed":
         return {"success": True, "status": "completed", "credits": transaction["credits"]}
 
-    # Verify with Flutterwave API
+    # Verify with Monnify API
     try:
+        access_token = await get_monnify_token()
+        encoded_ref = urllib.parse.quote(payment_reference, safe="")
+
         async with httpx.AsyncClient(timeout=15) as http_client:
             resp = await http_client.get(
-                "https://api.flutterwave.com/v3/transactions/verify_by_reference",
-                params={"tx_ref": payment_reference},
-                headers={"Authorization": f"Bearer {FLUTTERWAVE_SECRET_KEY}"},
+                f"{MONNIFY_BASE_URL}/api/v2/transactions/{encoded_ref}",
+                headers={"Authorization": f"Bearer {access_token}"},
             )
             resp.raise_for_status()
-            fw_data = resp.json()
+            mn_data = resp.json()
 
-        data = fw_data.get("data", {})
-        payment_status = data.get("status", "")
-        amount = float(data.get("amount", 0))
-        currency = data.get("currency", "")
-        logger.info(f"Flutterwave verify ref={payment_reference}: status={payment_status}, amount={amount}, currency={currency}")
+        body = mn_data.get("responseBody", {})
+        payment_status = body.get("paymentStatus", "")
+        amount = float(body.get("amountPaid", 0))
+        logger.info(f"Monnify verify ref={payment_reference}: status={payment_status}, amount={amount}")
 
-        if payment_status == "successful" and amount >= transaction["amount"] and currency == "NGN":
+        if payment_status == "PAID" and amount >= transaction["amount"]:
             # Atomically credit user (idempotent via pending filter)
             result = await db.transactions.update_one(
                 {"payment_reference": payment_reference, "status": "pending"},
@@ -1948,7 +1971,7 @@ async def verify_payment(
         return {"success": True, "status": "pending"}
 
     except Exception as e:
-        logger.error(f"Flutterwave verify error for ref={payment_reference}: {str(e)}")
+        logger.error(f"Monnify verify error for ref={payment_reference}: {str(e)}")
         return {"success": True, "status": "pending"}
 
 
@@ -2029,39 +2052,100 @@ async def transfer_credits(
     return {"success": True, "recipient_name": recipient_name, "amount": request.amount}
 
 
-# ==================== FLUTTERWAVE WEBHOOK ====================
+# ==================== FLUTTERWAVE WEBHOOK (DISABLED) ====================
 
 @app.post("/api/webhooks/flutterwave")
 async def flutterwave_webhook(request: Request):
-    """Handle Flutterwave payment webhook notifications"""
-    # Verify webhook hash — always required
-    if not FLUTTERWAVE_WEBHOOK_HASH:
-        logger.error("FLUTTERWAVE_WEBHOOK_HASH not configured — rejecting webhook")
+    """Flutterwave payments disabled — kept for reference"""
+    raise HTTPException(status_code=404, detail="Flutterwave payments disabled")
+    # --- Original Flutterwave webhook code preserved below ---
+    # if not FLUTTERWAVE_WEBHOOK_HASH:
+    #     logger.error("FLUTTERWAVE_WEBHOOK_HASH not configured — rejecting webhook")
+    #     raise HTTPException(status_code=503, detail="Webhook not configured")
+    # signature = request.headers.get("verif-hash", "")
+    # if not hmac.compare_digest(signature, FLUTTERWAVE_WEBHOOK_HASH):
+    #     logger.warning("Flutterwave webhook hash mismatch")
+    #     raise HTTPException(status_code=401, detail="Invalid webhook hash")
+    # payload = await request.json()
+    # event_data = payload.get("data", {})
+    # tx_ref = event_data.get("tx_ref", "")
+    # status = event_data.get("status", "")
+    # amount = float(event_data.get("amount", 0))
+    # logger.info(f"Flutterwave webhook: tx_ref={tx_ref}, status={status}, amount={amount}")
+    # if not tx_ref:
+    #     return {"status": "ignored"}
+    # transaction = await db.transactions.find_one({"payment_reference": tx_ref})
+    # if not transaction:
+    #     logger.warning(f"Flutterwave webhook — transaction not found for tx_ref: {tx_ref}")
+    #     return {"status": "ignored"}
+    # if status == "successful" and amount >= transaction["amount"]:
+    #     result = await db.transactions.update_one(
+    #         {"payment_reference": tx_ref, "status": "pending"},
+    #         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc)}},
+    #     )
+    #     if result.modified_count > 0:
+    #         buyer = await db.users.find_one({"id": transaction["user_id"]}, {"_id": 0, "is_trader": 1})
+    #         credits_to_add = transaction["credits"]
+    #         if buyer and buyer.get("is_trader"):
+    #             credits_to_add = int(credits_to_add * 1.15)
+    #         await db.users.update_one(
+    #             {"id": transaction["user_id"]},
+    #             {"$inc": {"credit_balance": credits_to_add}},
+    #         )
+    #         logger.info(f"Credited {credits_to_add} credits to user {transaction['user_id']}")
+    # return {"status": "ok"}
+
+
+# ==================== MONNIFY WEBHOOK ====================
+
+@app.post("/api/webhooks/monnify")
+async def monnify_webhook(request: Request):
+    """Handle Monnify payment webhook notifications"""
+    # Read raw body for signature verification
+    raw_body = await request.body()
+    signature = request.headers.get("monnify-signature", "")
+
+    if not MONNIFY_SECRET_KEY:
+        logger.error("MONNIFY_SECRET_KEY not configured — rejecting webhook")
         raise HTTPException(status_code=503, detail="Webhook not configured")
-    signature = request.headers.get("verif-hash", "")
-    if not hmac.compare_digest(signature, FLUTTERWAVE_WEBHOOK_HASH):
-        logger.warning("Flutterwave webhook hash mismatch")
-        raise HTTPException(status_code=401, detail="Invalid webhook hash")
 
-    payload = await request.json()
-    event_data = payload.get("data", {})
-    tx_ref = event_data.get("tx_ref", "")
-    status = event_data.get("status", "")
-    amount = float(event_data.get("amount", 0))
+    # Verify HMAC-SHA512 signature
+    computed = hmac.new(
+        MONNIFY_SECRET_KEY.encode(),
+        raw_body,
+        hashlib.sha512,
+    ).hexdigest()
 
-    logger.info(f"Flutterwave webhook: tx_ref={tx_ref}, status={status}, amount={amount}")
+    if not hmac.compare_digest(computed, signature):
+        logger.warning("Monnify webhook signature mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    payload = json.loads(raw_body)
+    event_data = payload.get("eventData", {})
+    tx_ref = event_data.get("transactionReference", "") or event_data.get("paymentReference", "")
+    payment_status = event_data.get("paymentStatus", "")
+    amount = float(event_data.get("amountPaid", 0))
+
+    logger.info(f"Monnify webhook: ref={tx_ref}, status={payment_status}, amount={amount}")
 
     if not tx_ref:
         return {"status": "ignored"}
 
+    # Try matching by paymentReference first (our reference), then transactionReference
     transaction = await db.transactions.find_one({"payment_reference": tx_ref})
     if not transaction:
-        logger.warning(f"Flutterwave webhook — transaction not found for tx_ref: {tx_ref}")
+        # Monnify may send transactionReference — try paymentReference from eventData
+        pay_ref = event_data.get("paymentReference", "")
+        if pay_ref and pay_ref != tx_ref:
+            transaction = await db.transactions.find_one({"payment_reference": pay_ref})
+
+    if not transaction:
+        logger.warning(f"Monnify webhook — transaction not found for ref: {tx_ref}")
         return {"status": "ignored"}
 
-    if status == "successful" and amount >= transaction["amount"]:
+    if payment_status == "PAID" and amount >= transaction["amount"]:
         result = await db.transactions.update_one(
-            {"payment_reference": tx_ref, "status": "pending"},
+            {"payment_reference": transaction["payment_reference"], "status": "pending"},
             {"$set": {
                 "status": "completed",
                 "completed_at": datetime.now(timezone.utc),
