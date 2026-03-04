@@ -51,7 +51,9 @@ speech_client = None
 gemini_client = None
 
 # JWT Configuration
-JWT_SECRET = os.environ.get("JWT_SECRET", "kwanya-dev-secret-change-in-production")
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable must be set")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 30  # 30 days
 
@@ -324,9 +326,10 @@ class ConversationCreate(BaseModel):
 
 # ==================== CREDITS & PAYMENT MODELS ====================
 
+CREDIT_RATE = 1  # 1 NGN = 1 credit
+
 class InitPaymentRequest(BaseModel):
     amount: float
-    credits: int
 
 
 class TransferCreditsRequest(BaseModel):
@@ -673,7 +676,7 @@ async def transcribe_audio(
         if credits_deducted:
             await refund_credits(user_id, VOICE_CREDIT_COST)
         logger.error(f"Transcription error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Transcription failed. Please try again.")
     finally:
         # Always clean up temp files
         for path in (temp_path, wav_path):
@@ -860,17 +863,22 @@ async def refund_credits(user_id: str, amount: int):
 
 
 @api_router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
     """Generate conversational AI response using Google Gemini"""
     try:
         logger.info(f"Chat request for conversation: {request.conversation_id}")
 
-        # Check credits / free message limit
-        user = await db.users.find_one({"id": request.user_id}) if request.user_id else None
+        # Authenticated user from JWT takes priority over request body user_id
+        auth_user = await get_current_user(authorization)
+        effective_user_id = auth_user["id"] if auth_user else request.user_id
+        user = auth_user or (await db.users.find_one({"id": request.user_id}) if request.user_id else None)
         is_authenticated = user is not None
 
         if is_authenticated:
-            if not await deduct_credits(request.user_id, CHAT_CREDIT_COST):
+            if not await deduct_credits(effective_user_id, CHAT_CREDIT_COST):
                 raise HTTPException(
                     status_code=402,
                     detail="Insufficient credits. Please top up to continue.",
@@ -878,7 +886,7 @@ async def chat(request: ChatRequest):
         else:
             # Unauthenticated — enforce free message limit across ALL conversations
             user_conversations = await db.conversations.find(
-                {"user_id": request.user_id}
+                {"user_id": effective_user_id}
             ).to_list(None)
             conv_ids = [c["id"] for c in user_conversations]
             total_messages = 0
@@ -972,27 +980,32 @@ Use web search for questions that require real-time or up-to-date information (e
         if is_authenticated:
             await refund_credits(request.user_id, CHAT_CREDIT_COST)
         logger.error(f"Chat error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Chat failed. Please try again.")
 
 
 @api_router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
     """Generate conversational AI response using Google Gemini with SSE streaming"""
     logger.info(f"Stream chat request for conversation: {request.conversation_id}")
 
     # --- Pre-stream checks (credit / auth) — errors returned as normal HTTP ---
-    user = await db.users.find_one({"id": request.user_id}) if request.user_id else None
+    auth_user = await get_current_user(authorization)
+    effective_user_id = auth_user["id"] if auth_user else request.user_id
+    user = auth_user or (await db.users.find_one({"id": request.user_id}) if request.user_id else None)
     is_authenticated = user is not None
 
     if is_authenticated:
-        if not await deduct_credits(request.user_id, CHAT_CREDIT_COST):
+        if not await deduct_credits(effective_user_id, CHAT_CREDIT_COST):
             raise HTTPException(
                 status_code=402,
                 detail="Insufficient credits. Please top up to continue.",
             )
     else:
         user_conversations = await db.conversations.find(
-            {"user_id": request.user_id}
+            {"user_id": effective_user_id}
         ).to_list(None)
         conv_ids = [c["id"] for c in user_conversations]
         total_messages = 0
@@ -1152,8 +1165,15 @@ async def create_conversation(input: ConversationCreate):
 
 
 @api_router.get("/conversations/{user_id}")
-async def get_conversations(user_id: str):
+async def get_conversations(
+    user_id: str,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
     """Get all conversations for a user that have at least one message"""
+    # If authenticated, only allow accessing own conversations
+    auth_user = await get_current_user(authorization)
+    if auth_user and auth_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
     pipeline = [
         {"$match": {"user_id": user_id}},
         {"$lookup": {
@@ -1192,12 +1212,21 @@ async def update_conversation(conversation_id: str, update: ConversationUpdate):
 
 
 @api_router.get("/conversations/{conversation_id}/messages")
-async def get_messages(conversation_id: str):
+async def get_messages(
+    conversation_id: str,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
     """Get all messages in a conversation"""
+    # Verify conversation ownership if authenticated
+    auth_user = await get_current_user(authorization)
+    if auth_user:
+        conv = await db.conversations.find_one({"id": conversation_id})
+        if conv and conv.get("user_id") != auth_user["id"]:
+            raise HTTPException(status_code=403, detail="Not authorized")
     messages = await db.messages.find(
         {"conversation_id": conversation_id}, {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
-    
+
     return {"success": True, "messages": messages}
 
 
@@ -1379,7 +1408,7 @@ async def signup_with_google(request: GoogleSignupRequest):
         raise
     except Exception as e:
         logger.error(f"Google signup error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Google authentication failed: {str(e)}")
+        raise HTTPException(status_code=400, detail="Google authentication failed")
 
 
 @auth_router.post("/signin")
@@ -1481,7 +1510,7 @@ async def signin_with_google(request: GoogleSigninRequest):
         raise
     except Exception as e:
         logger.error(f"Google signin error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Google authentication failed: {str(e)}")
+        raise HTTPException(status_code=400, detail="Google authentication failed")
 
 
 @auth_router.post("/verify-otp")
@@ -1801,13 +1830,14 @@ async def initialize_payment(
         raise HTTPException(status_code=500, detail="Payment gateway not configured")
 
     payment_reference = f"KWANYA-{uuid.uuid4().hex[:12].upper()}"
+    credits = int(request.amount / CREDIT_RATE)
 
     # Save transaction record
     transaction = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
         "amount": request.amount,
-        "credits": request.credits,
+        "credits": credits,
         "payment_reference": payment_reference,
         "status": "pending",
         "created_at": datetime.now(timezone.utc),
@@ -1833,7 +1863,7 @@ async def initialize_payment(
                     "payment_options": "banktransfer, ussd, nqr, opay",
                     "customizations": {
                         "title": "Kwanya Credits",
-                        "description": f"Purchase {request.credits} Kwanya credits",
+                        "description": f"Purchase {credits} Kwanya credits",
                     },
                 },
             )
@@ -2004,12 +2034,14 @@ async def transfer_credits(
 @app.post("/api/webhooks/flutterwave")
 async def flutterwave_webhook(request: Request):
     """Handle Flutterwave payment webhook notifications"""
-    # Verify webhook hash
-    if FLUTTERWAVE_WEBHOOK_HASH:
-        signature = request.headers.get("verif-hash", "")
-        if signature != FLUTTERWAVE_WEBHOOK_HASH:
-            logger.warning("Flutterwave webhook hash mismatch")
-            raise HTTPException(status_code=401, detail="Invalid webhook hash")
+    # Verify webhook hash — always required
+    if not FLUTTERWAVE_WEBHOOK_HASH:
+        logger.error("FLUTTERWAVE_WEBHOOK_HASH not configured — rejecting webhook")
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+    signature = request.headers.get("verif-hash", "")
+    if not hmac.compare_digest(signature, FLUTTERWAVE_WEBHOOK_HASH):
+        logger.warning("Flutterwave webhook hash mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook hash")
 
     payload = await request.json()
     event_data = payload.get("data", {})
@@ -2081,15 +2113,22 @@ async def health_check():
 app.include_router(api_router)
 app.include_router(auth_router)
 
-# CORS - restrict to known origins (allow all in development via env var)
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").split(",")
-if not allowed_origins or allowed_origins == [""]:
-    allowed_origins = ["*"]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=allowed_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS - restrict to known origins in production
+allowed_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origins=allowed_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    # Development: allow all origins but without credentials
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=False,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
