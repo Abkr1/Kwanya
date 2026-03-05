@@ -1933,7 +1933,7 @@ async def verify_payment(
 
     # Compute actual credits (with trader bonus) for response
     base_credits = transaction["credits"]
-    actual_credits = int(base_credits * 1.15) if user.get("is_trader") else base_credits
+    actual_credits = int(base_credits * 1.16) if user.get("is_trader") else base_credits
 
     if transaction["status"] == "completed":
         return {"success": True, "status": "completed", "credits": actual_credits}
@@ -2157,7 +2157,7 @@ async def monnify_webhook(request: Request):
             buyer = await db.users.find_one({"id": transaction["user_id"]}, {"_id": 0, "is_trader": 1})
             credits_to_add = transaction["credits"]
             if buyer and buyer.get("is_trader"):
-                credits_to_add = int(credits_to_add * 1.15)
+                credits_to_add = int(credits_to_add * 1.16)
             await db.users.update_one(
                 {"id": transaction["user_id"]},
                 {"$inc": {"credit_balance": credits_to_add}},
