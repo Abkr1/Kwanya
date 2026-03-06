@@ -250,7 +250,7 @@ export const translations: Record<Language, Record<string, string>> = {
     // Common
     'common.cancel': 'Soke',
     'common.delete': 'Goge',
-    'common.error': 'Kuskure',
+    'common.error': 'Afwan',
     'common.success': 'An yi nasara',
     'common.ok': 'To',
     'common.save': 'Ajiye',
