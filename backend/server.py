@@ -2320,6 +2320,62 @@ async def terms_of_use():
     return HTMLResponse(content=html)
 
 
+@app.get("/delete-account")
+async def delete_account_page():
+    """Serve account deletion instructions page"""
+    from fastapi.responses import HTMLResponse
+    content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delete Account - Kwanya</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px 16px; line-height: 1.6; color: #222; }
+  h1 { font-size: 1.4em; }
+  h2 { font-size: 1.1em; margin-top: 24px; }
+  .method { background: #f5f5f5; border-radius: 8px; padding: 16px; margin: 16px 0; }
+  ol { padding-left: 20px; }
+  a { color: #007AFF; }
+</style>
+</head>
+<body>
+<h1>Delete Your Kwanya Account</h1>
+<p>You can request deletion of your account and all associated data using either method below.</p>
+
+<div class="method">
+<h2>Option 1: Delete from the App</h2>
+<ol>
+  <li>Open the Kwanya app</li>
+  <li>Go to <strong>Account</strong></li>
+  <li>Tap <strong>Delete Account</strong></li>
+  <li>Confirm the deletion</li>
+</ol>
+<p>Your account and all data will be deleted immediately.</p>
+</div>
+
+<div class="method">
+<h2>Option 2: Request via Email</h2>
+<p>Send an email to <a href="mailto:privacy@trulib.com">privacy@trulib.com</a> with the subject line <strong>"Delete My Account"</strong>. Include the phone number or email address associated with your account.</p>
+<p>We will process your request within 7 business days.</p>
+</div>
+
+<h2>What gets deleted</h2>
+<ul>
+  <li>Your account profile and credentials</li>
+  <li>All conversations and messages</li>
+  <li>Credit balance and transaction history</li>
+  <li>Any other data associated with your account</li>
+</ul>
+
+<p><strong>This action is permanent and cannot be undone.</strong></p>
+
+<p style="margin-top: 32px; color: #666; font-size: 0.9em;">Kwanya is operated by Trulib Ltd. For questions, contact <a href="mailto:privacy@trulib.com">privacy@trulib.com</a></p>
+</body>
+</html>"""
+    return HTMLResponse(content=content)
+
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/health")
