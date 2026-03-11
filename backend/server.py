@@ -2167,6 +2167,215 @@ async def monnify_webhook(request: Request):
     return {"status": "ok"}
 
 
+# ==================== LEGAL PAGES ====================
+
+_LEGAL_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title} - Kwanya</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px 16px; line-height: 1.6; color: #222; }}
+  h1 {{ font-size: 1.4em; }}
+  pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: inherit; }}
+</style>
+</head>
+<body>
+<pre>{content}</pre>
+</body>
+</html>"""
+
+_PRIVACY_POLICY = """PRIVACY POLICY
+
+Effective Date: 22 February 2026
+
+Trulib Ltd ("we," "us," or "our") operates the Kwanya mobile application ("App"). This Privacy Policy explains how we collect, use, store, and protect your personal data when you use our App.
+
+By using Kwanya, you agree to the practices described in this Privacy Policy.
+
+1. INFORMATION WE COLLECT
+
+a) Information You Provide:
+\u2022 Phone number or email address (for account registration)
+\u2022 One-Time Passwords (OTPs) for verification
+\u2022 Text messages and voice recordings submitted during conversations
+\u2022 Payment information processed through Monnify
+
+b) Information Collected Automatically:
+\u2022 Device type and operating system
+\u2022 App usage data (e.g., session frequency, features used)
+\u2022 Unique device identifiers
+\u2022 Conversation metadata (timestamps, message counts)
+
+c) Information from Third Parties:
+\u2022 Payment confirmation data from Monnify
+\u2022 Verification status from Termii (SMS/Email OTP provider)
+
+2. HOW WE USE YOUR INFORMATION
+
+We use your data to:
+\u2022 Provide and improve AI-powered conversational services
+\u2022 Verify your identity during registration and login
+\u2022 Process credit purchases and manage your account balance
+\u2022 Monitor usage for billing (credit deductions per message/voice input)
+\u2022 Improve the quality and accuracy of our AI responses
+\u2022 Ensure security and prevent fraud or abuse
+\u2022 Comply with legal obligations
+
+3. AI DATA PROCESSING
+
+\u2022 Your text and voice inputs are sent to third-party AI models (e.g., Google Gemini) for generating responses.
+\u2022 Voice inputs are processed using automatic speech recognition (ASR) to convert speech to text before being sent to the AI model.
+\u2022 We may retain conversation history to maintain context within a session. Context is limited to the most recent messages per conversation.
+\u2022 We do not use your personal conversations to train AI models.
+
+4. DATA SHARING
+
+We do not sell your personal data. We may share your data with:
+\u2022 AI Service Providers (e.g., Google) \u2014 to process your queries
+\u2022 Payment Processors (e.g., Monnify) \u2014 to handle transactions
+\u2022 Communication Providers (e.g., Termii) \u2014 to send OTPs
+\u2022 Law Enforcement \u2014 if required by law or to protect rights and safety
+
+All third-party providers are bound by their own privacy policies and data protection obligations.
+
+5. DATA RETENTION
+
+\u2022 Account data: Retained as long as your account is active
+\u2022 Conversation history: Stored to maintain context; may be deleted upon account deletion
+\u2022 Payment records: Retained as required by financial regulations
+\u2022 OTP data: Deleted immediately after verification
+
+You may request deletion of your data by contacting us (see Section 11).
+
+6. DATA SECURITY
+
+We implement reasonable technical and organizational measures to protect your data, including:
+\u2022 Encrypted data transmission (HTTPS/TLS)
+\u2022 Secure storage of credentials and tokens
+\u2022 Access controls on backend systems
+\u2022 Regular security reviews
+
+However, no system is completely secure, and we cannot guarantee absolute protection.
+
+7. CHILDREN'S PRIVACY
+
+Kwanya is not intended for children under the age of 13. We do not knowingly collect personal data from children under 13. If we discover such data has been collected, we will delete it promptly. Users between 13 and 18 must have parental or guardian consent.
+
+8. YOUR RIGHTS
+
+Depending on your jurisdiction, you may have the right to:
+\u2022 Access the personal data we hold about you
+\u2022 Request correction of inaccurate data
+\u2022 Request deletion of your data
+\u2022 Withdraw consent for data processing
+\u2022 Object to certain types of data processing
+\u2022 Request data portability
+
+To exercise any of these rights, contact us at the details in Section 11.
+
+9. COOKIES AND TRACKING
+
+The Kwanya App does not use browser cookies. We may use local storage (e.g., AsyncStorage) on your device to maintain session data and preferences. This data remains on your device and is not transmitted to external tracking services.
+
+10. CHANGES TO THIS POLICY
+
+We may update this Privacy Policy from time to time. Any changes will be posted within the App, and your continued use constitutes acceptance of the updated policy. We encourage you to review this policy periodically.
+
+11. CONTACT US
+
+If you have questions, concerns, or requests regarding your privacy, please contact:
+
+Trulib Ltd
+Email: privacy@trulib.com
+
+12. GOVERNING LAW
+
+This Privacy Policy is governed by the laws of the Federal Republic of Nigeria, including the Nigeria Data Protection Regulation (NDPR) and any successor legislation."""
+
+
+_TERMS_OF_USE = """TERMS OF USE
+
+Effective Date: 22 February 2026
+
+Welcome to Kwanya, an AI-powered educational and conversational assistant designed primarily for Hausa-speaking users. These Terms of Use ("Terms") govern your access to and use of the Kwanya mobile application ("App"), operated by Trulib Ltd ("we," "us," or "our").
+
+By downloading, accessing, or using Kwanya, you agree to be bound by these Terms. If you do not agree, please do not use the App."""
+
+
+@app.get("/privacy")
+async def privacy_policy():
+    """Serve privacy policy as a web page"""
+    from fastapi.responses import HTMLResponse
+    html = _LEGAL_HTML_TEMPLATE.format(title="Privacy Policy", content=_PRIVACY_POLICY)
+    return HTMLResponse(content=html)
+
+
+@app.get("/terms")
+async def terms_of_use():
+    """Serve terms of use as a web page"""
+    from fastapi.responses import HTMLResponse
+    html = _LEGAL_HTML_TEMPLATE.format(title="Terms of Use", content=_TERMS_OF_USE)
+    return HTMLResponse(content=html)
+
+
+@app.get("/delete-account")
+async def delete_account_page():
+    """Serve account deletion instructions page"""
+    from fastapi.responses import HTMLResponse
+    content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delete Account - Kwanya</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px 16px; line-height: 1.6; color: #222; }
+  h1 { font-size: 1.4em; }
+  h2 { font-size: 1.1em; margin-top: 24px; }
+  .method { background: #f5f5f5; border-radius: 8px; padding: 16px; margin: 16px 0; }
+  ol { padding-left: 20px; }
+  a { color: #007AFF; }
+</style>
+</head>
+<body>
+<h1>Delete Your Kwanya Account</h1>
+<p>You can request deletion of your account and all associated data using either method below.</p>
+
+<div class="method">
+<h2>Option 1: Delete from the App</h2>
+<ol>
+  <li>Open the Kwanya app</li>
+  <li>Go to <strong>Account</strong></li>
+  <li>Tap <strong>Delete Account</strong></li>
+  <li>Confirm the deletion</li>
+</ol>
+<p>Your account and all data will be deleted immediately.</p>
+</div>
+
+<div class="method">
+<h2>Option 2: Request via Email</h2>
+<p>Send an email to <a href="mailto:privacy@trulib.com">privacy@trulib.com</a> with the subject line <strong>"Delete My Account"</strong>. Include the phone number or email address associated with your account.</p>
+<p>We will process your request within 7 business days.</p>
+</div>
+
+<h2>What gets deleted</h2>
+<ul>
+  <li>Your account profile and credentials</li>
+  <li>All conversations and messages</li>
+  <li>Credit balance and transaction history</li>
+  <li>Any other data associated with your account</li>
+</ul>
+
+<p><strong>This action is permanent and cannot be undone.</strong></p>
+
+<p style="margin-top: 32px; color: #666; font-size: 0.9em;">Kwanya is operated by Trulib Ltd. For questions, contact <a href="mailto:privacy@trulib.com">privacy@trulib.com</a></p>
+</body>
+</html>"""
+    return HTMLResponse(content=content)
+
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/health")
