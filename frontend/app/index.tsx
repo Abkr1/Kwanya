@@ -82,6 +82,7 @@ export default function KwanyaApp() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<Conversation[]>([]);
   const [themeExpanded, setThemeExpanded] = useState(false);
+  const [paymentsEnabled, setPaymentsEnabled] = useState(true);
 
   const flatListRef = useRef<FlatList>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -97,6 +98,17 @@ export default function KwanyaApp() {
   // Keep refs in sync with state
   useEffect(() => { recordingRef.current = recording; }, [recording]);
   useEffect(() => { conversationRef.current = currentConversation; }, [currentConversation]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await axios.get(`${BACKEND_URL}/api/features`, { timeout: 5000 });
+        setPaymentsEnabled(resp.data.payments ?? true);
+      } catch {
+        // Default to enabled if flag fetch fails
+      }
+    })();
+  }, []);
 
   const prevAuthRef = useRef(isAuthenticated);
 
@@ -1445,6 +1457,7 @@ export default function KwanyaApp() {
                   <View style={styles.menuOptionSpacer} />
                   <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
                 </TouchableOpacity>
+                {paymentsEnabled && (
                 <TouchableOpacity
                   style={styles.menuOption}
                   activeOpacity={0.6}
@@ -1458,6 +1471,7 @@ export default function KwanyaApp() {
                   <View style={styles.menuOptionSpacer} />
                   <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
                 </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={styles.menuOption}
                   activeOpacity={0.6}
