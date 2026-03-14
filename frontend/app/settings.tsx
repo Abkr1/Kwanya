@@ -31,6 +31,16 @@ export default function SettingsScreen() {
   const { t, language, setLanguage } = useLanguage();
   const [section, setSection] = useState<Section>('menu');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [paymentsEnabled, setPaymentsEnabled] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await axios.get(`${BACKEND_URL}/api/features`, { timeout: 5000 });
+        setPaymentsEnabled(resp.data.payments ?? true);
+      } catch {}
+    })();
+  }, []);
 
   const styles = useMemo(
     () =>
@@ -324,7 +334,13 @@ export default function SettingsScreen() {
           contentContainerStyle={styles.documentContent}
         >
           <Text style={styles.documentText} selectable>
-            {legalDocuments[language].termsOfUse}
+            {paymentsEnabled
+              ? legalDocuments[language].termsOfUse
+              : legalDocuments[language].termsOfUse
+                  .split('\n')
+                  .filter((l: string) => !/payment|Payment|Monnify|credit purchase|credit deduction|billing|biya|Biya|kuɗi/i.test(l))
+                  .join('\n')
+            }
           </Text>
         </ScrollView>
       )}
@@ -336,7 +352,13 @@ export default function SettingsScreen() {
           contentContainerStyle={styles.documentContent}
         >
           <Text style={styles.documentText} selectable>
-            {legalDocuments[language].privacyPolicy}
+            {paymentsEnabled
+              ? legalDocuments[language].privacyPolicy
+              : legalDocuments[language].privacyPolicy
+                  .split('\n')
+                  .filter((l: string) => !/payment|Payment|Monnify|credit purchase|credit deduction|billing|biya|Biya|kuɗi/i.test(l))
+                  .join('\n')
+            }
           </Text>
         </ScrollView>
       )}

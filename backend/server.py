@@ -75,6 +75,9 @@ MONNIFY_SECRET_KEY = os.environ.get("MONNIFY_SECRET_KEY", "")
 MONNIFY_CONTRACT_CODE = os.environ.get("MONNIFY_CONTRACT_CODE", "")
 MONNIFY_BASE_URL = os.environ.get("MONNIFY_BASE_URL", "https://api.monnify.com")
 
+# Feature Flags (controlled via env vars on Railway)
+ENABLE_PAYMENTS = os.environ.get("ENABLE_PAYMENTS", "true").lower() == "true"
+
 # ==================== GOOGLE CLOUD SPEECH-TO-TEXT (Hausa) ====================
 
 def init_speech_client():
@@ -606,29 +609,30 @@ async def transcribe_audio(
     is_authenticated = user is not None
     credits_deducted = False
 
-    if is_authenticated:
-        if not await deduct_credits(user_id, VOICE_CREDIT_COST):
-            raise HTTPException(
-                status_code=402,
-                detail="Insufficient credits. Please top up to continue.",
-            )
-        credits_deducted = True
-    else:
-        # Unauthenticated — enforce free message limit across ALL conversations
-        user_conversations = await db.conversations.find(
-            {"user_id": user_id}
-        ).to_list(None)
-        conv_ids = [c["id"] for c in user_conversations]
-        total_messages = 0
-        if conv_ids:
-            total_messages = await db.messages.count_documents(
-                {"conversation_id": {"$in": conv_ids}, "role": "user"}
-            )
-        if total_messages >= FREE_MESSAGE_LIMIT:
-            raise HTTPException(
-                status_code=402,
-                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
-            )
+    if ENABLE_PAYMENTS:
+        if is_authenticated:
+            if not await deduct_credits(user_id, VOICE_CREDIT_COST):
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient credits. Please top up to continue.",
+                )
+            credits_deducted = True
+        else:
+            # Unauthenticated — enforce free message limit across ALL conversations
+            user_conversations = await db.conversations.find(
+                {"user_id": user_id}
+            ).to_list(None)
+            conv_ids = [c["id"] for c in user_conversations]
+            total_messages = 0
+            if conv_ids:
+                total_messages = await db.messages.count_documents(
+                    {"conversation_id": {"$in": conv_ids}, "role": "user"}
+                )
+            if total_messages >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+                )
 
     temp_path = None
     wav_path = None
@@ -706,28 +710,29 @@ async def transcribe_audio_stream(
     is_authenticated = user is not None
     credits_deducted = False
 
-    if is_authenticated:
-        if not await deduct_credits(user_id, VOICE_CREDIT_COST):
-            raise HTTPException(
-                status_code=402,
-                detail="Insufficient credits. Please top up to continue.",
-            )
-        credits_deducted = True
-    else:
-        user_conversations = await db.conversations.find(
-            {"user_id": user_id}
-        ).to_list(None)
-        conv_ids = [c["id"] for c in user_conversations]
-        total_messages = 0
-        if conv_ids:
-            total_messages = await db.messages.count_documents(
-                {"conversation_id": {"$in": conv_ids}, "role": "user"}
-            )
-        if total_messages >= FREE_MESSAGE_LIMIT:
-            raise HTTPException(
-                status_code=402,
-                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
-            )
+    if ENABLE_PAYMENTS:
+        if is_authenticated:
+            if not await deduct_credits(user_id, VOICE_CREDIT_COST):
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient credits. Please top up to continue.",
+                )
+            credits_deducted = True
+        else:
+            user_conversations = await db.conversations.find(
+                {"user_id": user_id}
+            ).to_list(None)
+            conv_ids = [c["id"] for c in user_conversations]
+            total_messages = 0
+            if conv_ids:
+                total_messages = await db.messages.count_documents(
+                    {"conversation_id": {"$in": conv_ids}, "role": "user"}
+                )
+            if total_messages >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+                )
 
     # Read audio content before entering generator (UploadFile must be consumed in request scope)
     content = await audio.read()
@@ -884,28 +889,29 @@ async def chat(
         user = auth_user or (await db.users.find_one({"id": request.user_id}) if request.user_id else None)
         is_authenticated = user is not None
 
-        if is_authenticated:
-            if not await deduct_credits(effective_user_id, CHAT_CREDIT_COST):
-                raise HTTPException(
-                    status_code=402,
-                    detail="Insufficient credits. Please top up to continue.",
-                )
-        else:
-            # Unauthenticated — enforce free message limit across ALL conversations
-            user_conversations = await db.conversations.find(
-                {"user_id": effective_user_id}
-            ).to_list(None)
-            conv_ids = [c["id"] for c in user_conversations]
-            total_messages = 0
-            if conv_ids:
-                total_messages = await db.messages.count_documents(
-                    {"conversation_id": {"$in": conv_ids}, "role": "user"}
-                )
-            if total_messages >= FREE_MESSAGE_LIMIT:
-                raise HTTPException(
-                    status_code=402,
-                    detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
-                )
+        if ENABLE_PAYMENTS:
+            if is_authenticated:
+                if not await deduct_credits(effective_user_id, CHAT_CREDIT_COST):
+                    raise HTTPException(
+                        status_code=402,
+                        detail="Insufficient credits. Please top up to continue.",
+                    )
+            else:
+                # Unauthenticated — enforce free message limit across ALL conversations
+                user_conversations = await db.conversations.find(
+                    {"user_id": effective_user_id}
+                ).to_list(None)
+                conv_ids = [c["id"] for c in user_conversations]
+                total_messages = 0
+                if conv_ids:
+                    total_messages = await db.messages.count_documents(
+                        {"conversation_id": {"$in": conv_ids}, "role": "user"}
+                    )
+                if total_messages >= FREE_MESSAGE_LIMIT:
+                    raise HTTPException(
+                        status_code=402,
+                        detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+                    )
 
         # Save user message to database
         user_msg = Message(
@@ -1004,27 +1010,28 @@ async def chat_stream(
     user = auth_user or (await db.users.find_one({"id": request.user_id}) if request.user_id else None)
     is_authenticated = user is not None
 
-    if is_authenticated:
-        if not await deduct_credits(effective_user_id, CHAT_CREDIT_COST):
-            raise HTTPException(
-                status_code=402,
-                detail="Insufficient credits. Please top up to continue.",
-            )
-    else:
-        user_conversations = await db.conversations.find(
-            {"user_id": effective_user_id}
-        ).to_list(None)
-        conv_ids = [c["id"] for c in user_conversations]
-        total_messages = 0
-        if conv_ids:
-            total_messages = await db.messages.count_documents(
-                {"conversation_id": {"$in": conv_ids}, "role": "user"}
-            )
-        if total_messages >= FREE_MESSAGE_LIMIT:
-            raise HTTPException(
-                status_code=402,
-                detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
-            )
+    if ENABLE_PAYMENTS:
+        if is_authenticated:
+            if not await deduct_credits(effective_user_id, CHAT_CREDIT_COST):
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient credits. Please top up to continue.",
+                )
+        else:
+            user_conversations = await db.conversations.find(
+                {"user_id": effective_user_id}
+            ).to_list(None)
+            conv_ids = [c["id"] for c in user_conversations]
+            total_messages = 0
+            if conv_ids:
+                total_messages = await db.messages.count_documents(
+                    {"conversation_id": {"$in": conv_ids}, "role": "user"}
+                )
+            if total_messages >= FREE_MESSAGE_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"You've used all {FREE_MESSAGE_LIMIT} free messages. Sign up to continue chatting!",
+                )
 
     # Save user message to database
     user_msg = Message(
@@ -2304,11 +2311,22 @@ Welcome to Kwanya, an AI-powered educational and conversational assistant design
 By downloading, accessing, or using Kwanya, you agree to be bound by these Terms. If you do not agree, please do not use the App."""
 
 
+def _strip_payment_lines(text: str) -> str:
+    """Remove lines referencing payments/credits/Monnify when payments are disabled."""
+    payment_keywords = ("payment", "Payment", "Monnify", "credit purchase", "credit deduction", "billing")
+    lines = text.split("\n")
+    filtered = [line for line in lines if not any(kw in line for kw in payment_keywords)]
+    # Collapse triple+ blank lines left by removals
+    import re as _re
+    return _re.sub(r"\n{3,}", "\n\n", "\n".join(filtered))
+
+
 @app.get("/privacy")
 async def privacy_policy():
     """Serve privacy policy as a web page"""
     from fastapi.responses import HTMLResponse
-    html = _LEGAL_HTML_TEMPLATE.format(title="Privacy Policy", content=_PRIVACY_POLICY)
+    content = _PRIVACY_POLICY if ENABLE_PAYMENTS else _strip_payment_lines(_PRIVACY_POLICY)
+    html = _LEGAL_HTML_TEMPLATE.format(title="Privacy Policy", content=content)
     return HTMLResponse(content=html)
 
 
@@ -2316,7 +2334,8 @@ async def privacy_policy():
 async def terms_of_use():
     """Serve terms of use as a web page"""
     from fastapi.responses import HTMLResponse
-    html = _LEGAL_HTML_TEMPLATE.format(title="Terms of Use", content=_TERMS_OF_USE)
+    content = _TERMS_OF_USE if ENABLE_PAYMENTS else _strip_payment_lines(_TERMS_OF_USE)
+    html = _LEGAL_HTML_TEMPLATE.format(title="Terms of Use", content=content)
     return HTMLResponse(content=html)
 
 
@@ -2374,6 +2393,16 @@ async def delete_account_page():
 </body>
 </html>"""
     return HTMLResponse(content=content)
+
+
+# ==================== FEATURE FLAGS ====================
+
+@api_router.get("/features")
+async def get_feature_flags():
+    """Return feature flags for the client app"""
+    return {
+        "payments": ENABLE_PAYMENTS,
+    }
 
 
 # ==================== HEALTH CHECK ====================

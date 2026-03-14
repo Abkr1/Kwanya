@@ -46,6 +46,7 @@ export default function CreditsScreen() {
 
   const [balance, setBalance] = useState(user?.credit_balance ?? 0);
   const [showBalance, setShowBalance] = useState(false);
+  const [paymentsEnabled, setPaymentsEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState<'buy' | 'send'>('buy');
   const [customAmount, setCustomAmount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -97,6 +98,19 @@ export default function CreditsScreen() {
   useEffect(() => {
     fetchBalance();
   }, [fetchBalance]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await axios.get(`${BACKEND_URL}/api/features`, { timeout: 5000 });
+        const enabled = resp.data.payments ?? true;
+        setPaymentsEnabled(enabled);
+        if (!enabled) setActiveTab('send');
+      } catch {
+        // Default to enabled if flag fetch fails
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -650,26 +664,28 @@ export default function CreditsScreen() {
           </TouchableOpacity>
 
           {/* Tab Switcher */}
-          <View style={styles.tabRow}>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'buy' && styles.tabActive]}
-              onPress={() => setActiveTab('buy')}
-            >
-              <Text style={[styles.tabText, activeTab === 'buy' && styles.tabTextActive]}>
-                {t('credits.buyCredits')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'send' && styles.tabActive]}
-              onPress={() => setActiveTab('send')}
-            >
-              <Text style={[styles.tabText, activeTab === 'send' && styles.tabTextActive]}>
-                {t('credits.sendCredits')}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          {paymentsEnabled ? (
+            <View style={styles.tabRow}>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === 'buy' && styles.tabActive]}
+                onPress={() => setActiveTab('buy')}
+              >
+                <Text style={[styles.tabText, activeTab === 'buy' && styles.tabTextActive]}>
+                  {t('credits.buyCredits')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === 'send' && styles.tabActive]}
+                onPress={() => setActiveTab('send')}
+              >
+                <Text style={[styles.tabText, activeTab === 'send' && styles.tabTextActive]}>
+                  {t('credits.sendCredits')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
-          {activeTab === 'buy' ? (
+          {activeTab === 'buy' && paymentsEnabled ? (
             <>
               {/* Preset Packs */}
               <View style={styles.section}>
