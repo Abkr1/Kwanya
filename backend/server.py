@@ -75,6 +75,9 @@ MONNIFY_SECRET_KEY = os.environ.get("MONNIFY_SECRET_KEY", "")
 MONNIFY_CONTRACT_CODE = os.environ.get("MONNIFY_CONTRACT_CODE", "")
 MONNIFY_BASE_URL = os.environ.get("MONNIFY_BASE_URL", "https://api.monnify.com")
 
+# Feature Flags (controlled via env vars on Railway)
+ENABLE_PAYMENTS = os.environ.get("ENABLE_PAYMENTS", "true").lower() == "true"
+
 # ==================== GOOGLE CLOUD SPEECH-TO-TEXT (Hausa) ====================
 
 def init_speech_client():
@@ -2374,6 +2377,16 @@ async def delete_account_page():
 </body>
 </html>"""
     return HTMLResponse(content=content)
+
+
+# ==================== FEATURE FLAGS ====================
+
+@api_router.get("/features")
+async def get_feature_flags():
+    """Return feature flags for the client app"""
+    return {
+        "payments": ENABLE_PAYMENTS,
+    }
 
 
 # ==================== HEALTH CHECK ====================
