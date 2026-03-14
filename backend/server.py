@@ -2307,11 +2307,22 @@ Welcome to Kwanya, an AI-powered educational and conversational assistant design
 By downloading, accessing, or using Kwanya, you agree to be bound by these Terms. If you do not agree, please do not use the App."""
 
 
+def _strip_payment_lines(text: str) -> str:
+    """Remove lines referencing payments/credits/Monnify when payments are disabled."""
+    payment_keywords = ("payment", "Payment", "Monnify", "credit purchase", "credit deduction", "billing")
+    lines = text.split("\n")
+    filtered = [line for line in lines if not any(kw in line for kw in payment_keywords)]
+    # Collapse triple+ blank lines left by removals
+    import re as _re
+    return _re.sub(r"\n{3,}", "\n\n", "\n".join(filtered))
+
+
 @app.get("/privacy")
 async def privacy_policy():
     """Serve privacy policy as a web page"""
     from fastapi.responses import HTMLResponse
-    html = _LEGAL_HTML_TEMPLATE.format(title="Privacy Policy", content=_PRIVACY_POLICY)
+    content = _PRIVACY_POLICY if ENABLE_PAYMENTS else _strip_payment_lines(_PRIVACY_POLICY)
+    html = _LEGAL_HTML_TEMPLATE.format(title="Privacy Policy", content=content)
     return HTMLResponse(content=html)
 
 
@@ -2319,7 +2330,8 @@ async def privacy_policy():
 async def terms_of_use():
     """Serve terms of use as a web page"""
     from fastapi.responses import HTMLResponse
-    html = _LEGAL_HTML_TEMPLATE.format(title="Terms of Use", content=_TERMS_OF_USE)
+    content = _TERMS_OF_USE if ENABLE_PAYMENTS else _strip_payment_lines(_TERMS_OF_USE)
+    html = _LEGAL_HTML_TEMPLATE.format(title="Terms of Use", content=content)
     return HTMLResponse(content=html)
 
 
