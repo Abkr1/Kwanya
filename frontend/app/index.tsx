@@ -500,7 +500,9 @@ export default function KwanyaApp() {
       removeBubble();
       setIsLoading(false);
       if (status === 402) {
-        if (!isAuthenticated || detail.includes('Sign up')) {
+        if (!paymentsEnabled) {
+          Alert.alert(t('common.error'), detail || t('chat.failedTranscribe'));
+        } else if (!isAuthenticated || detail.includes('Sign up')) {
           Alert.alert(
             t('chat.freeMessagesUsed'),
             t('chat.freeMessagesBody'),
@@ -822,7 +824,9 @@ export default function KwanyaApp() {
     // Handle credit / HTTP error responses
     const handleErrorDetail = (status: number, detail: string) => {
       if (status === 402) {
-        if (!isAuthenticated || detail.includes('Sign up')) {
+        if (!paymentsEnabled) {
+          Alert.alert(t('common.error'), detail || t('chat.failedGetResponse'));
+        } else if (!isAuthenticated || detail.includes('Sign up')) {
           Alert.alert(
             t('chat.freeMessagesUsed'),
             t('chat.freeMessagesBody'),
@@ -842,6 +846,10 @@ export default function KwanyaApp() {
             ],
           );
         }
+        return;
+      }
+      if (!paymentsEnabled) {
+        Alert.alert(t('common.error'), detail || t('chat.failedGetResponse'));
         return;
       }
       const isCreditsError = detail.toLowerCase().includes('credit') || detail.toLowerCase().includes('kati');
