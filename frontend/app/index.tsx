@@ -343,7 +343,7 @@ export default function KwanyaApp() {
 
     // 2. Fetch fresh messages from server
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/conversations/${conversation.id}/messages`, { timeout: 10000 });
+      const response = await axios.get(`${BACKEND_URL}/api/conversations/${conversation.id}/messages?user_id=${userId}`, { timeout: 10000 });
       if (response.data.success) {
         setMessages(response.data.messages);
         await AsyncStorage.setItem(`kwanya_messages_${conversation.id}`, JSON.stringify(response.data.messages));
@@ -363,7 +363,7 @@ export default function KwanyaApp() {
         ? firstMessage.substring(0, 30) + '...'
         : firstMessage;
 
-      await axios.patch(`${BACKEND_URL}/api/conversations/${conversationId}`, {
+      await axios.patch(`${BACKEND_URL}/api/conversations/${conversationId}?user_id=${userId}`, {
         title: title
       });
 
