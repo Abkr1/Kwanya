@@ -325,7 +325,7 @@ class TranscriptionRequest(BaseModel):
 class ChatRequest(BaseModel):
     conversation_id: str
     user_id: str
-    message: str
+    message: str = Field(..., max_length=5000)
     language: str = "ha"
 
 
@@ -1168,10 +1168,19 @@ Use web search for questions that require real-time or up-to-date information (e
 # ==================== CONVERSATION MANAGEMENT ====================
 
 @api_router.post("/conversations", response_model=Conversation)
-async def create_conversation(input: ConversationCreate):
+async def create_conversation(
+    input: ConversationCreate,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+):
     """Create a new conversation"""
+    # If authenticated, force user_id to match JWT (prevent forging)
+    auth_user = await get_current_user(authorization)
+    user_id = auth_user["id"] if auth_user else input.user_id
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
     conversation = Conversation(
-        user_id=input.user_id,
+        user_id=user_id,
         language=input.language
     )
     await db.conversations.insert_one(conversation.model_dump())
@@ -1207,21 +1216,35 @@ async def get_conversations(
 
 
 class ConversationUpdate(BaseModel):
-    title: Optional[str] = None
+    title: Optional[str] = Field(None, max_length=200)
 
 
 @api_router.patch("/conversations/{conversation_id}")
-async def update_conversation(conversation_id: str, update: ConversationUpdate):
-    """Update a conversation (e.g., rename title)"""
+async def update_conversation(
+    conversation_id: str,
+    update: ConversationUpdate,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+    user_id: str = "",
+):
+    """Update a conversation (e.g., rename title) — requires ownership"""
+    auth_user = await get_current_user(authorization)
+    effective_user_id = auth_user["id"] if auth_user else user_id
+
+    conv = await db.conversations.find_one({"id": conversation_id})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.get("user_id") != effective_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     update_data = {"updated_at": datetime.now(timezone.utc)}
     if update.title:
         update_data["title"] = update.title
-    
+
     await db.conversations.update_one(
         {"id": conversation_id},
         {"$set": update_data}
     )
-    
+
     return {"success": True, "message": "Conversation updated"}
 
 
@@ -1229,14 +1252,18 @@ async def update_conversation(conversation_id: str, update: ConversationUpdate):
 async def get_messages(
     conversation_id: str,
     authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+    user_id: str = "",
 ):
-    """Get all messages in a conversation"""
-    # Verify conversation ownership if authenticated
+    """Get all messages in a conversation — requires ownership"""
     auth_user = await get_current_user(authorization)
-    if auth_user:
-        conv = await db.conversations.find_one({"id": conversation_id})
-        if conv and conv.get("user_id") != auth_user["id"]:
-            raise HTTPException(status_code=403, detail="Not authorized")
+    effective_user_id = auth_user["id"] if auth_user else user_id
+
+    conv = await db.conversations.find_one({"id": conversation_id})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.get("user_id") != effective_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     messages = await db.messages.find(
         {"conversation_id": conversation_id}, {"_id": 0}
     ).sort("timestamp", 1).to_list(1000)
@@ -1245,16 +1272,22 @@ async def get_messages(
 
 
 @api_router.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str, user_id: str = ""):
-    """Delete a conversation and its messages (requires matching user_id)"""
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
+async def delete_conversation(
+    conversation_id: str,
+    authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
+    user_id: str = "",
+):
+    """Delete a conversation and its messages — requires ownership"""
+    auth_user = await get_current_user(authorization)
+    effective_user_id = auth_user["id"] if auth_user else user_id
+    if not effective_user_id:
+        raise HTTPException(status_code=400, detail="Not authorized")
 
     conversation = await db.conversations.find_one({"id": conversation_id})
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if conversation.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this conversation")
+    if conversation.get("user_id") != effective_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     await db.conversations.delete_one({"id": conversation_id})
     await db.messages.delete_many({"conversation_id": conversation_id})
@@ -1281,7 +1314,7 @@ async def signup_with_phone(request: PhoneSignupRequest):
     # Check if phone already exists
     existing = await db.users.find_one({"phone": clean_phone})
     if existing:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
+        raise HTTPException(status_code=400, detail="Unable to create account. Please try signing in.")
 
     # Generate email from phone number
     email = generate_email_from_phone(clean_phone)
@@ -1334,7 +1367,7 @@ async def signup_with_email(request: EmailSignupRequest):
     # Check if email already exists
     existing = await db.users.find_one({"email": request.email.lower()})
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Unable to create account. Please try signing in.")
 
     user = User(
         email=request.email.lower(),
@@ -1393,11 +1426,11 @@ async def signup_with_google(request: GoogleSignupRequest):
         # Check if Google account already linked
         existing = await db.users.find_one({"google_id": google_id})
         if existing:
-            raise HTTPException(status_code=400, detail="Google account already registered. Please sign in.")
+            raise HTTPException(status_code=400, detail="Unable to create account. Please try signing in.")
 
         existing_email = await db.users.find_one({"email": email})
         if existing_email:
-            raise HTTPException(status_code=400, detail="Email already registered with another method")
+            raise HTTPException(status_code=400, detail="Unable to create account. Please try signing in.")
 
         user = User(
             email=email,
@@ -1462,7 +1495,7 @@ async def signin(request: SigninRequest):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if not user.get("password_hash"):
-        raise HTTPException(status_code=401, detail="This account uses Google sign-in")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if not verify_password(request.password, user["password_hash"]):
         # Increment failed attempt count
@@ -1511,7 +1544,7 @@ async def signin_with_google(request: GoogleSigninRequest):
 
         user = await db.users.find_one({"google_id": google_id})
         if not user:
-            raise HTTPException(status_code=401, detail="No account found. Please sign up first.")
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
         token = create_token(user["id"])
 
@@ -1593,7 +1626,7 @@ async def resend_otp(request: ResendOTPRequest):
         raise HTTPException(status_code=404, detail="Phone number not found")
 
     if user.get("is_phone_verified"):
-        raise HTTPException(status_code=400, detail="Phone already verified")
+        raise HTTPException(status_code=400, detail="Verification not required")
 
     # Send new OTP via Termii Token API
     pin_id = await send_sms_otp(clean_phone)
@@ -1623,7 +1656,7 @@ async def resend_email_code(request: ResendEmailCodeRequest):
         raise HTTPException(status_code=404, detail="Email not found")
 
     if user.get("is_email_verified"):
-        raise HTTPException(status_code=400, detail="Email already verified")
+        raise HTTPException(status_code=400, detail="Verification not required")
 
     # Delete old codes and create new one
     await db.email_codes.delete_many({"email": email})
@@ -1651,10 +1684,9 @@ async def forgot_password(request: ForgotPasswordRequest):
     if is_email:
         email = identifier.lower()
         user = await db.users.find_one({"email": email})
-        if not user:
-            raise HTTPException(status_code=404, detail="No account found with this email")
-        if not user.get("password_hash"):
-            raise HTTPException(status_code=400, detail="This account uses Google sign-in. Password reset is not available.")
+        if not user or not user.get("password_hash"):
+            # Return success to prevent account enumeration
+            return {"success": True, "method": "email"}
 
         # Generate and store reset code
         code = generate_otp()
@@ -1676,10 +1708,9 @@ async def forgot_password(request: ForgotPasswordRequest):
             raise HTTPException(status_code=400, detail="Invalid phone number")
 
         user = await db.users.find_one({"phone": clean_phone})
-        if not user:
-            raise HTTPException(status_code=404, detail="No account found with this phone number")
-        if not user.get("password_hash"):
-            raise HTTPException(status_code=400, detail="This account uses Google sign-in. Password reset is not available.")
+        if not user or not user.get("password_hash"):
+            # Return success to prevent account enumeration
+            return {"success": True, "method": "sms"}
 
         # Send OTP via Termii
         pin_id = await send_sms_otp(clean_phone)
@@ -2444,8 +2475,8 @@ if allowed_origins:
         CORSMiddleware,
         allow_credentials=True,
         allow_origins=allowed_origins,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 else:
     # Development: allow all origins but without credentials
