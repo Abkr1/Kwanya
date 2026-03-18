@@ -1693,7 +1693,7 @@ export default function KwanyaApp() {
         /* Empty state - welcome centered, input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <Pressable style={styles.emptyStateBody} onPress={Keyboard.dismiss}>
@@ -1725,7 +1725,7 @@ export default function KwanyaApp() {
         /* Messages exist - normal layout with input at bottom */
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior="padding"
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
           <FlatList
