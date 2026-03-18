@@ -599,7 +599,6 @@ export default function CreditsScreen() {
           originWhitelist={['https://*', 'http://*']}
           cacheEnabled
           startInLoadingState
-          allowsBackForwardNavigationGestures
           renderLoading={() => (
             <ActivityIndicator
               size="large"

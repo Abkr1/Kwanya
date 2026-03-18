@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { View, StatusBar, Platform } from 'react-native';
+import { View, StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Stack } from 'expo-router';
 import { ThemeProvider as NavThemeProvider, DefaultTheme, DarkTheme } from '@react-navigation/native';
@@ -26,9 +26,8 @@ function RootNavigator() {
     <View style={{ flex: 1, backgroundColor: palette.bg }}>
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={Platform.OS === 'android' ? palette.bg : undefined}
-        translucent={Platform.OS === 'android' ? false : undefined}
-        animated
+        backgroundColor={palette.bg}
+        translucent={false}
       />
       <NavThemeProvider value={navTheme}>
         <Stack
