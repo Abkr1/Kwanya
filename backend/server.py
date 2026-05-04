@@ -945,7 +945,7 @@ Use web search for questions that require real-time or up-to-date information (e
         # Get response from Gemini with retry on rate limit
         gemini_response = await _gemini_generate_with_retry(
             gemini_client.models.generate_content,
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_message,
@@ -1070,7 +1070,7 @@ Use web search for questions that require real-time or up-to-date information (e
     remaining = user["credit_balance"] - CHAT_CREDIT_COST if is_authenticated else None
 
     gemini_kwargs = dict(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
         config=genai.types.GenerateContentConfig(
             system_instruction=system_message,
