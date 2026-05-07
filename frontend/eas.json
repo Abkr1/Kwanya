@@ -16,6 +16,9 @@
       "android": {
         "buildType": "app-bundle"
       },
+      "ios": {
+        "distribution": "store"
+      },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://kwanya-production.up.railway.app"
       }
