@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 3.0.0"
+    "version": ">= 3.0.0",
+    "appVersionSource": "local"
   },
   "build": {
     "preview": {
@@ -28,7 +29,8 @@
     "production": {
       "ios": {
         "appleId": "abusambo1@gmail.com",
-"appleTeamId": "W688SQB8HK"
+        "ascAppId": "6767190240",
+        "appleTeamId": "W688SQB8HK"
       }
     }
   }
