@@ -23,5 +23,13 @@
         "EXPO_PUBLIC_BACKEND_URL": "https://kwanya-production.up.railway.app"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "abusambo1@gmail.com",
+"appleTeamId": "W688SQB8HK"
+      }
+    }
   }
 }
