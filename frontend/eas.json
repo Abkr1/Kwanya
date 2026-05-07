@@ -29,7 +29,8 @@
     "production": {
       "ios": {
         "appleId": "abusambo1@gmail.com",
-"appleTeamId": "W688SQB8HK"
+        "ascAppId": "6767190240",
+        "appleTeamId": "W688SQB8HK"
       }
     }
   }
