@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "bundleIdentifier": "com.trulib.kwanya",
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Record voice messages in Hausa",
