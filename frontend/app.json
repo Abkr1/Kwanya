@@ -10,10 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.trulib.kwanya",
+      "buildNumber": "2",
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Record voice messages in Hausa",
-        "NSSpeechRecognitionUsageDescription": "Transcribe Hausa speech to text",
+        "NSMicrophoneUsageDescription": "Kwanya needs access to your microphone so you can record voice messages in Hausa. Your recordings are sent to our AI assistant to generate a spoken response. The microphone is only activated when you tap the record button.",
+        "NSSpeechRecognitionUsageDescription": "Kwanya uses speech recognition to convert your voice recordings into text so the AI assistant can understand your message and reply in Hausa.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -43,7 +44,7 @@
       [
         "expo-av",
         {
-          "microphonePermission": "Allow Kwanya to record audio for voice messages."
+          "microphonePermission": "Kwanya needs access to your microphone so you can record voice messages in Hausa. Your recordings are sent to our AI assistant to generate a spoken response. The microphone is only activated when you tap the record button."
         }
       ],
       [
