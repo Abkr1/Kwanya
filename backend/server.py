@@ -325,7 +325,7 @@ class TranscriptionRequest(BaseModel):
 class ChatRequest(BaseModel):
     conversation_id: str
     user_id: str
-    message: str
+    message: str = Field(..., min_length=1, max_length=4000)
     language: str = "ha"
 
 
@@ -949,6 +949,8 @@ Use web search for questions that require real-time or up-to-date information (e
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_message,
+                max_output_tokens=2048,
+                temperature=0.8,
                 tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
                     dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
                         mode="MODE_DYNAMIC",
@@ -1074,6 +1076,8 @@ Use web search for questions that require real-time or up-to-date information (e
         contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
         config=genai.types.GenerateContentConfig(
             system_instruction=system_message,
+            max_output_tokens=2048,
+            temperature=0.8,
             tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
                 dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
                     mode="MODE_DYNAMIC",
