@@ -949,7 +949,7 @@ Use web search for questions that require real-time or up-to-date information (e
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_message,
-                max_output_tokens=2048,
+                max_output_tokens=8192,
                 temperature=0.8,
                 tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
                     dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
@@ -1076,7 +1076,7 @@ Use web search for questions that require real-time or up-to-date information (e
         contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
         config=genai.types.GenerateContentConfig(
             system_instruction=system_message,
-            max_output_tokens=2048,
+            max_output_tokens=8192,
             temperature=0.8,
             tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
                 dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
