@@ -154,7 +154,7 @@ def init_gemini_client():
         client_kwargs = {
             "vertexai": True,
             "project": os.environ.get('GCP_PROJECT_ID'),
-            "location": os.environ.get('GCP_LOCATION', 'us-central1'),
+            "location": os.environ.get('GCP_LOCATION', 'global'),
         }
         if sa_b64:
             sa_json = base64.b64decode(sa_b64).decode('utf-8')
