@@ -804,6 +804,7 @@ CHAT_CREDIT_COST = 5   # credits (₦5) per text message
 VOICE_CREDIT_COST = 5  # credits (₦5) per voice message
 CONTEXT_WINDOW = 10    # max previous messages sent to Gemini
 FREE_MESSAGE_LIMIT = 5   # free messages for unauthenticated users
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 WELCOME_BONUS_CREDITS = 25  # 5 free messages × ₦5 per message
 
 # Retry config for Gemini 429 RESOURCE_EXHAUSTED errors
@@ -880,6 +881,10 @@ async def chat(
     authorization: Optional[str] = Security(APIKeyHeader(name="Authorization", auto_error=False)),
 ):
     """Generate conversational AI response using Google Gemini"""
+    # Initialized before the try block so the error handler never hits undefined names
+    is_authenticated = False
+    effective_user_id = request.user_id
+
     try:
         logger.info(f"Chat request for conversation: {request.conversation_id}")
 
@@ -945,18 +950,13 @@ Use web search for questions that require real-time or up-to-date information (e
         # Get response from Gemini with retry on rate limit
         gemini_response = await _gemini_generate_with_retry(
             gemini_client.models.generate_content,
-            model="gemini-3.5-flash",
+            model=GEMINI_MODEL,
             contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_message,
                 max_output_tokens=8192,
                 temperature=0.8,
-                tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
-                    dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
-                        mode="MODE_DYNAMIC",
-                        dynamic_threshold=0.7,
-                    )
-                ))],
+                tools=[genai.types.Tool(google_search=genai.types.GoogleSearch())],
             ),
         )
         response = gemini_response.text
@@ -993,7 +993,7 @@ Use web search for questions that require real-time or up-to-date information (e
     except Exception as e:
         # Refund credits on failure
         if is_authenticated:
-            await refund_credits(request.user_id, CHAT_CREDIT_COST)
+            await refund_credits(effective_user_id, CHAT_CREDIT_COST)
         logger.error(f"Chat error: {str(e)}")
         raise HTTPException(status_code=500, detail="Chat failed. Please try again.")
 
@@ -1072,18 +1072,13 @@ Use web search for questions that require real-time or up-to-date information (e
     remaining = user["credit_balance"] - CHAT_CREDIT_COST if is_authenticated else None
 
     gemini_kwargs = dict(
-        model="gemini-3.5-flash",
+        model=GEMINI_MODEL,
         contents=[*history, genai.types.Content(role="user", parts=[genai.types.Part(text=request.message)])],
         config=genai.types.GenerateContentConfig(
             system_instruction=system_message,
             max_output_tokens=8192,
             temperature=0.8,
-            tools=[genai.types.Tool(google_search=genai.types.GoogleSearchRetrieval(
-                dynamic_retrieval_config=genai.types.DynamicRetrievalConfig(
-                    mode="MODE_DYNAMIC",
-                    dynamic_threshold=0.7,
-                )
-            ))],
+            tools=[genai.types.Tool(google_search=genai.types.GoogleSearch())],
         ),
     )
 
@@ -1163,7 +1158,7 @@ Use web search for questions that require real-time or up-to-date information (e
             logger.error(f"Stream chat error: {str(e)}")
             # Refund credits on failure
             if is_authenticated:
-                await refund_credits(request.user_id, CHAT_CREDIT_COST)
+                await refund_credits(effective_user_id, CHAT_CREDIT_COST)
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
